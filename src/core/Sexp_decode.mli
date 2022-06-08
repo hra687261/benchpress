@@ -109,6 +109,10 @@ val applied_fields : string -> Fields.t t
 (** [applied_fields "foo"] accepts [("foo" (a b) (c d) …)]
     and returns the corresponding list of fields. *)
 
+val all_applied_fields : string -> Fields.t t
+
+val applied_fields_opt : string -> (Fields.t -> 'a option m) -> 'a option m
+
 type err
 
 val run : 'a t -> sexp -> ('a, err) result

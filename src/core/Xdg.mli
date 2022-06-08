@@ -5,9 +5,10 @@
 
 val name_of_project : string ref
 
-val get_home : unit -> string
+val get_home : ?remote_info: Remote_info.t -> unit -> string
 
-val interpolate_home : ?f:(string -> string option) -> string -> string
+val interpolate_home : ?remote_info: Remote_info.t ->
+  ?f:(string -> string option) -> string -> string
 (** Replace [$HOME] by the home directory in this string.
     @param f used to interpolate other keys
     @raise Failure if another key is met

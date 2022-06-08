@@ -38,7 +38,8 @@ type action =
       provers: string list;
       timeout: int option;
       memory: int option;
-      stack : stack_limit option;
+      stack: stack_limit option;
+      remote: Remote_info.t option;
       loc: Loc.t;
     }
   | A_git_checkout of {
@@ -145,14 +146,15 @@ let pp_stack_limit out = function
 let rec pp_action out =
   let open Misc.Pp in
   function
-  | A_run_provers {dirs;provers;timeout;memory;stack;pattern;loc=_} ->
-    Fmt.fprintf out "(@[<v>run_provers%a%a%a%a%a%a@])"
+  | A_run_provers {dirs;provers;timeout;memory;stack;pattern;remote;loc=_} ->
+    Fmt.fprintf out "(@[<v>run_provers%a%a%a%a%a%a%a@])"
       (pp_f "dirs" (pp_l pp_str)) dirs
       (pp_f "provers" (pp_l pp_str)) provers
       (pp_opt "pattern" pp_regex) pattern
       (pp_opt "timeout" Fmt.int) timeout
       (pp_opt "memory" Fmt.int) memory
       (pp_opt "stack" pp_stack_limit) stack
+      (pp_opt "remote" Remote_info.pp) remote
   | A_progn l -> Fmt.fprintf out "(@[progn %a@])" (pp_l pp_action) l
   | A_run_cmd {cmd=s;loc=_} -> Fmt.fprintf out "(@[run_cmd %a@])" pp_regex s
   | A_git_checkout {dir;ref;fetch_first;loc=_;} ->
@@ -307,22 +309,31 @@ let dec_stack_limit : _ SD.t =
     (is_atom, keyword ~msg:"unlimited" ["unlimited", Unlimited]);
   ]
 
+let dec_remote_info =
+  let open SD in
+  let* m = applied_fields "remote" in
+  let* host = Fields.field m "host" string in
+  let* username = Fields.field_opt m "username" string in
+  let+ () = Fields.check_no_field_left m in
+  Remote_info.make ?username host
+
 let dec_action : action SD.t =
   let open SD in
   fix @@ fun self ->
   let* loc = value_loc in
   try_l ~msg:"expected an action" [
     (is_applied "run_provers",
-     let* m = applied_fields "run_provers" in
+     let* m = all_applied_fields "run_provers" in
      let* dirs = Fields.field m "dirs" atom_or_atom_list in
      let* provers = Fields.field m "provers" atom_or_atom_list in
      let* pattern = Fields.field_opt m "pattern" dec_regex in
      let* timeout = Fields.field_opt m "timeout" int in
      let* memory = Fields.field_opt m "memory" int in
      let* stack = Fields.field_opt m "stack" dec_stack_limit in
+     let* remote = Fields.field_opt m "remote" dec_remote_info in
      let+ () = Fields.check_no_field_left m in
      let memory = Some (CCOpt.get_or ~default:10_000_000 memory) in
-     A_run_provers {dirs;provers;timeout;memory;stack;pattern;loc}
+     A_run_provers {dirs;provers;timeout;memory;stack;pattern;remote;loc}
     );
     (is_applied "progn",
      let+ l = applied "progn" self in

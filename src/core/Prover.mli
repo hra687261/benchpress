@@ -116,6 +116,7 @@ val run :
   ?proof_file:string ->
   limits:Limit.All.t ->
   file:string ->
+  ?remote_info:Remote_info.t ->
   t ->
   Run_proc_result.t
 

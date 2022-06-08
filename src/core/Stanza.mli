@@ -34,6 +34,7 @@ type action =
       timeout: int option;
       memory: int option;
       stack : stack_limit option;
+      remote: Remote_info.t option;
       loc: Loc.t;
     }
   | A_git_checkout of {

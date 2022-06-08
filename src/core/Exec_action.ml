@@ -35,6 +35,7 @@ module Exec_run_provers : sig
     ?limits:Limit.All.t ->
     ?proof_dir:string ->
     ?interrupted:(unit -> bool) ->
+    ?remote_info: Remote_info.t ->
     Definitions.t ->
     t -> expanded
 
@@ -46,6 +47,7 @@ module Exec_run_provers : sig
     ?on_proof_check:(Test.proof_check_result -> unit) ->
     ?on_done:(Test_compact_result.t -> unit) ->
     ?interrupted:(unit -> bool) ->
+    ?remote_info: Remote_info.t ->
     uuid:Uuidm.t ->
     save:bool ->
     expanded ->
@@ -76,7 +78,7 @@ end = struct
       (fun path -> Re.execp re path)
 
   (* turn a subdir into a list of problems *)
-  let expand_subdir ?pattern ?(interrupted=fun _->false)
+  let expand_subdir ?pattern ?(interrupted=fun _->false) ?remote_info
       ~dyn (s:Subdir.t) : Problem.t list =
     Error.guard (Error.wrapf "expand_subdir of_dir %a" Subdir.pp s) @@ fun() ->
     try
@@ -84,13 +86,19 @@ end = struct
       let filter2 = filter_regex_ pattern in
       let filter s = filter1 s && filter2 s in
       let files =
-        CCIO.File.walk_l s.Subdir.path
-        |> CCList.filter_map
-          (fun (kind,f) ->
-             if interrupted() then Error.fail "files.walk.interrupted";
-             match kind with
-             | `File when filter f -> Some f
-             | _ -> None)
+        match remote_info with
+        | Some r_info when Option.is_some s.inside.pattern ->
+          Remote_info.get_sub_files
+            r_info s.path (Option.get s.inside.pattern)
+        | Some _ -> []
+        | None ->
+          CCIO.File.walk_l s.Subdir.path
+          |> CCList.filter_map
+            (fun (kind,f) ->
+               if interrupted() then Error.fail "files.walk.interrupted";
+               match kind with
+               | `File when filter f -> Some f
+               | _ -> None)
       in
       let n_files = List.length files in
       let n_done = ref 0 in
@@ -105,7 +113,7 @@ end = struct
                    !n_done n_files (Misc.truncate_left 30 path);
                )
            );
-           let res =Problem.make_find_expect path ~expect:s.Subdir.inside.expect in
+           let res =Problem.make_find_expect ?remote_info path ~expect:s.Subdir.inside.expect in
            incr n_done;
            res)
         with
@@ -113,7 +121,7 @@ end = struct
         | exn -> Error.(raise @@ of_exn exn)
 
   (* Expand options into concrete choices *)
-  let expand ?j ?(dyn=false) ?limits ?proof_dir ?interrupted
+  let expand ?j ?(dyn=false) ?limits ?proof_dir ?interrupted ?remote_info
       (defs:Definitions.t) (self:t) : expanded =
     let limits = match limits with
       | None -> self.limits
@@ -121,7 +129,8 @@ end = struct
     in
     let j = j >?? self.j >? Misc.guess_cpu_count () in
     let problems = CCList.flat_map
-        (expand_subdir ?pattern:self.pattern ~dyn ?interrupted) self.dirs in
+        (expand_subdir ?pattern:self.pattern ?interrupted ?remote_info ~dyn) self.dirs
+    in
     let checkers =
       Definitions.all_checkers defs
       |> List.map (fun c -> let c=c.With_loc.view in c.Proof_checker.name, c)
@@ -154,6 +163,7 @@ end = struct
       ?(on_start=_nop) ?(on_solve = _nop) ?(on_start_proof_check=_nop)
       ?(on_proof_check = _nop) ?(on_done = _nop)
       ?(interrupted=fun _->false)
+      ?remote_info
       ~uuid ~save
       (self:expanded) : _*_ =
     let start = Misc.now_s() in
@@ -217,7 +227,7 @@ end = struct
       with_proof_file_opt ~proof_file ~keep @@ fun () ->
 
       let result =
-        Run_prover_problem.run ~limits:self.limits ~proof_file
+        Run_prover_problem.run ~limits:self.limits ~proof_file ?remote_info
           prover pb
       in
       (* insert into DB here *)
@@ -245,7 +255,7 @@ end = struct
           let res =
             let limits = Limit.All.mk ~time:(Limit.Time.mk ~h:1 ()) () in
             Run_prover_problem.run_proof_check ~limits
-              ~proof_file:pfile prover checker pb
+              ~proof_file:pfile ?remote_info prover checker pb
           in
           let ev_checker = Run_event.mk_checker res in
           on_proof_check res;

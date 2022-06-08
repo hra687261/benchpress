@@ -45,7 +45,7 @@ val add_stanza_l : ?reify_errors:bool -> Stanza.t list -> t -> t
 
 val of_stanza_l : ?reify_errors:bool -> Stanza.t list -> t
 
-val mk_subdir : t -> string -> Subdir.t
+val mk_subdir : ?remote_info:Remote_info.t -> t -> string -> Subdir.t
 
 val mk_run_provers :
   ?j:int ->
@@ -55,6 +55,7 @@ val mk_run_provers :
   ?pattern:string ->
   paths:path list ->
   provers:string list ->
+  ?remote: Remote_info.t ->
   loc:Loc.t option ->
   t ->
   Action.run_provers

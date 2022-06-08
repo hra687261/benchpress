@@ -5,13 +5,14 @@ module Log = (val Logs.src_log (Logs.Src.create "benchpress.run-main"))
 
 (* run provers on the given dirs, return a list [prover, dir, results] *)
 let execute_run_prover_action
-    ?j ?timestamp ?pp_results ?dyn ?limits ?proof_dir ~notify ~uuid ~save
+    ?j ?timestamp ?pp_results ?dyn ?limits ?proof_dir
+    ?remote_info ~notify ~uuid ~save
     (defs: Definitions.t) (r:Action.run_provers)
   : (_ * Test_compact_result.t) =
   begin
     Error.guard (Error.wrapf "run prover action@ `@[%a@]`" Action.pp_run_provers r) @@ fun () ->
     let interrupted = CCLock.create false in
-    let r = Exec_action.Exec_run_provers.expand ?dyn ?j ?proof_dir ?limits defs r in
+    let r = Exec_action.Exec_run_provers.expand ?remote_info ?dyn ?j ?proof_dir ?limits defs r in
     let len = List.length r.problems in
     Notify.sendf notify "testing with %d provers, %d problems…"
       (List.length r.provers) len;
@@ -22,6 +23,7 @@ let execute_run_prover_action
       Error.guard (Error.wrapf "running %d tests" len) @@ fun () ->
       Exec_action.Exec_run_provers.run ~uuid ?timestamp
         ~interrupted:(fun () -> CCLock.get interrupted)
+        ?remote_info
         ~on_solve:progress#on_res ~save
         ~on_start_proof_check:(fun() -> progress#on_start_proof_check)
         ~on_proof_check:progress#on_proof_check_res
@@ -57,7 +59,8 @@ let main ?j ?pp_results ?dyn ?timeout ?memory ?csv ?(provers=[])
         | {view={Task.action=Action.Act_run_provers r;_};loc} ->
           Error.guard (Error.wrap ~loc "running task 'run provers'") @@ fun () ->
           (* convert paths and provers *)
-          let paths = CCList.map (Definitions.mk_subdir defs) paths in
+          let remote_info = r.remote in
+          let paths = CCList.map (Definitions.mk_subdir ?remote_info defs) paths in
           let provers = CCList.map (Definitions.find_prover' defs) provers in
           let provers =
             provers @ r.provers
@@ -87,12 +90,13 @@ let main ?j ?pp_results ?dyn ?timeout ?memory ?csv ?(provers=[])
       let j = CCOpt.Infix.( j <+> Definitions.option_j defs) in
       let progress = CCOpt.Infix.( dyn <+> Definitions.option_progress defs) in
       let limits = run_provers_action.limits in
+      let remote_info = run_provers_action.remote in
       (* run action here! *)
       let uuid = Misc.mk_uuid() in
 
       let (top_res, (results:Test_compact_result.t)) =
         execute_run_prover_action
-          ~uuid ?pp_results ?proof_dir ?dyn:progress ~limits ?j ~notify ~timestamp ~save
+          ~uuid ?pp_results ?proof_dir ?remote_info ?dyn:progress ~limits ?j ~notify ~timestamp ~save
           defs run_provers_action
       in
       if CCOpt.is_some csv then (

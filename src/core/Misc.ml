@@ -188,12 +188,14 @@ let get_binary_of_cmd (cmd:string) : string =
   (try fst @@ CCString.Split.left_exn ~by:" " cmd
    with Not_found -> cmd)
 
-let mk_abs_path (s:string) : string =
+let mk_abs_path ?remote_info (s:string) : string =
   match CCString.chop_prefix ~pre:"file://" s with
   | Some s -> s (* URIs from lsp *)
-  | None ->
-    if Filename.is_relative s then Filename.concat (Sys.getcwd()) s
-    else s
+  | None when Filename.is_relative s ->
+    if Option.is_some remote_info
+    then Remote_info.paths_error ()
+    else Filename.concat (Sys.getcwd()) s
+  | None -> s
 
 (** Guess how many cores we have on the CPU *)
 let guess_cpu_count () =

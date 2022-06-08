@@ -6,25 +6,34 @@ let int_of_process_status = function
   | Unix.WSIGNALED i
   | Unix.WSTOPPED i -> i
 
-let run cmd : Run_proc_result.t =
+let exec_run cmd =
+  let oc, ic, errc = Unix.open_process_full cmd (Unix.environment()) in
+  close_out ic;
+  (* read out and err *)
+  let err = ref "" in
+  let t_err = Thread.create (fun e -> err := CCIO.read_all e) errc in
+  let out = CCIO.read_all oc in
+  Thread.join t_err;
+  let status = Unix.close_process_full (oc, ic, errc) in
+  object
+    method stdout= out
+    method stderr= !err
+    method errcode=int_of_process_status status
+    method status=status
+  end
+let exec_run_remote remote_info cmd =
+  let ncmd = Remote_info.wrap_cmd remote_info cmd in
+  exec_run ncmd
+
+let run ?remote_info cmd: Run_proc_result.t =
   let start = Ptime_clock.now() in
   (* call process and block *)
   let p =
     try
-      let oc, ic, errc = Unix.open_process_full cmd (Unix.environment()) in
-      close_out ic;
-      (* read out and err *)
-      let err = ref "" in
-      let t_err = Thread.create (fun e -> err := CCIO.read_all e) errc in
-      let out = CCIO.read_all oc in
-      Thread.join t_err;
-      let status = Unix.close_process_full (oc, ic, errc) in
-      object
-        method stdout= out
-        method stderr= !err
-        method errcode=int_of_process_status status
-        method status=status
-      end
+      CCOption.map_or
+        ~default:(exec_run cmd)
+        (fun rinfo -> exec_run_remote rinfo cmd)
+        remote_info
     with e ->
       object
         method stdout=""

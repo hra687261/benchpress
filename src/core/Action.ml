@@ -10,7 +10,8 @@ type run_provers = {
   dirs: Subdir.t list; (* list of directories to examine *)
   provers: Prover.t list;
   pattern: string option;
-  limits : Limit.All.t;
+  limits: Limit.All.t;
+  remote: Remote_info.t option;
   loc: Loc.t option;
 }
 
@@ -34,14 +35,15 @@ type t =
 
 let pp_run_provers out (self:run_provers) =
   let open Misc.Pp in
-  let {dirs; provers; limits; j; pattern; loc=_; } = self in
-  Fmt.fprintf out "(@[<v1>run_provers%a%a%a%a%a%a%a@])"
+  let {dirs; provers; limits; j; pattern; remote; loc=_; } = self in
+  Fmt.fprintf out "(@[<v1>run_provers%a%a%a%a%a%a%a%a@])"
     (pp_f "dirs" (pp_l Subdir.pp)) dirs
     (pp_f "provers" (pp_l Prover.pp_name)) provers
     (pp_opt "pattern" pp_regex) pattern
     (pp_opt "timeout" Limit.Time.pp) limits.time
     (pp_opt "memory" Limit.Memory.pp) limits.memory
     (pp_opt "stack" Limit.Stack.pp) limits.stack
+    (pp_opt "remote" Remote_info.pp) remote
     (pp_opt "j" Fmt.int) j
 
 let pp_git_fetch out = function

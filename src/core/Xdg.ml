@@ -5,21 +5,32 @@ let getenv_or_empty s =
 
 let (<+>) x y = if x="" then y() else x
 
-let get_home : unit -> string =
+let get_home ?remote_info : unit -> string =
   let s = lazy (getenv_or_empty "HOME" <+> (fun () -> "/tmp")) in
-  fun () -> Lazy.force s
+  fun () ->
+    CCOption.map_or
+      ~default:(Lazy.force s)
+      ( fun r_info ->
+          let inc = Unix.open_process_in (Remote_info.wrap_cmd r_info "pwd") in
+          let l = input_line inc in
+          close_in inc;
+          l
+          (*?*)
+      ) remote_info
 
-let interpolate_home ?(f=fun _-> None) s =
+let interpolate_home ?remote_info ?(f=fun _-> None) s =
   let buf = Buffer.create (String.length s) in
   Buffer.add_substitute buf
     (function
-      | "HOME" | "home" -> get_home()
-      | s ->
+      | "HOME" | "home" -> get_home ?remote_info ()
+      | s when Option.is_none remote_info ->
         begin match f s with
           | Some u -> u
           | None ->
             Error.failf "interpolate home: couldn't find variable: '%s'" s
-        end)
+        end
+      | _ -> Remote_info.paths_error ()
+    )
     s;
   Buffer.contents buf
 

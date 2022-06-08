@@ -181,7 +181,7 @@ end
 module Map = CCMap.Make(As_key)
 module Set = CCSet.Make(As_key)
 
-let run ?env ?proof_file ~limits ~file (self:t) : Run_proc_result.t =
+let run ?env ?proof_file ~limits ~file ?remote_info (self:t) : Run_proc_result.t =
   Log.debug
     (fun k->k "(@[Prover.run %s %a@])" self.name Limit.All.pp limits);
   let cmd = make_command ?env ?proof_file ~limits self ~file in
@@ -191,7 +191,7 @@ let run ?env ?proof_file ~limits ~file (self:t) : Run_proc_result.t =
       Limit.All.update_time (CCOpt.map Limit.Time.(add (mk ~s:1 ()))) limits
     ) in
   let cmd = Ulimit.prefix_cmd ?prefix ~cmd () in
-  Run_proc.run cmd
+  Run_proc.run ?remote_info cmd
 
 let analyze_p_opt (self:t) (r:Run_proc_result.t) : Res.t option =
   (* find if [re: re option] is present in [stdout] *)

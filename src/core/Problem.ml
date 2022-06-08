@@ -53,7 +53,7 @@ module Exp_ = struct
 end
 
 (* find expected result for [file] *)
-let find_expect ?default_expect ~expect file : Res.t =
+let find_expect ?default_expect ~expect ?remote_info file : Res.t =
   Logs.debug ~src:src_log
     (fun k->k "(@[<2>find_expect `%s`@ using %a@])…" file Dir.pp_expect expect);
   let rec loop expect =
@@ -76,6 +76,7 @@ let find_expect ?default_expect ~expect file : Res.t =
                      ~time:(Limit.Time.mk ~s:1 ())
                      ~memory:(Limit.Memory.mk ~m:200 ())
                      ())
+          ?remote_info
       in
       match Prover.analyze_p_opt prover raw, default_expect with
       | Some r, _ -> r
@@ -85,8 +86,8 @@ let find_expect ?default_expect ~expect file : Res.t =
   in
   loop expect
 
-let make_find_expect ~expect file : t =
-  let expect = find_expect ~expect file in
+let make_find_expect ?remote_info ~expect file : t =
+  let expect = find_expect ?remote_info ~expect file in
   make file expect
 
 let compare_res pb res =

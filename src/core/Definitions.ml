@@ -118,20 +118,34 @@ let find_task self name : Task.t with_loc =
 let find_prover' self name = With_loc.view @@ find_prover self name
 let find_task' self name = With_loc.view @@ find_task self name
 
-let norm_path ~cur_dir s =
+let norm_path ?remote_info ~cur_dir s =
   let f s = match s with
     | "cur_dir" -> Some cur_dir
     | _ -> None
   in
-  s |> Xdg.interpolate_home ~f |> Misc.mk_abs_path
+  s |> Xdg.interpolate_home ?remote_info ~f |> Misc.mk_abs_path ?remote_info
+
+let stat_st_dev ?remote_info path =
+  let f r_info =
+    let ncmd =
+      Remote_info.wrap_cmd r_info ("stat --format=%d "^path)
+    in
+    let inc = Unix.open_process_in ncmd in
+    let st_dev = int_of_string (input_line inc) in
+    let _ = Unix.close_process_in inc in
+    st_dev
+  in
+  match remote_info with
+  | Some r_info -> f r_info
+  | None -> (Unix.stat path).Unix.st_dev
 
 (* find a known directory for [path] *)
-let mk_subdir self path : Subdir.t =
-  let path = norm_path ~cur_dir:self.cur_dir path in
+let mk_subdir ?remote_info self path : Subdir.t =
+  let path = norm_path ?remote_info ~cur_dir:self.cur_dir path in
   (* helper *)
   let is_parent (dir:string) (f:string) : bool =
-    let fd_dir = (Unix.stat dir).Unix.st_dev in
-    let same_file f = try (Unix.stat f).Unix.st_dev = fd_dir with _ -> false in
+    let fd_dir = stat_st_dev ?remote_info dir in
+    let same_file f = try stat_st_dev ?remote_info f = fd_dir with _ -> false in
     (* check f and its parents *)
     let rec check f =
       same_file f ||
@@ -142,8 +156,22 @@ let mk_subdir self path : Subdir.t =
   in
   CCList.find_map
     (fun dir ->
-       Logs.debug (fun k->k"check prefix dir=%S for %S" dir.Dir.path path);
-       if is_parent dir.Dir.path path
+       let dir_path =
+         match remote_info with
+         | Some r_info ->
+           let abs_path =
+             norm_path ?remote_info ~cur_dir:self.cur_dir path
+           in
+           if Remote_info.directory_exists r_info abs_path then () else
+             Error.failf ~loc:dir.Dir.loc
+               "%S is not a directory (cur_dir: %S)"
+               abs_path self.cur_dir;
+           abs_path
+         | None -> dir.Dir.path
+       in
+       (* it has to be done here, because it's not done for remote files the config files are parsed *)
+       Logs.debug (fun k->k"check prefix dir=%S for %S" dir_path path);
+       if is_parent dir_path path
        then Some {Subdir.path; loc=dir.loc; inside=dir}
        else None)
     self.dirs
@@ -172,20 +200,20 @@ let mk_limits ?timeout ?memory ?stack () =
 
 
 let mk_run_provers
-    ?j ?timeout ?memory ?stack ?pattern ~paths ~provers ~loc
+    ?j ?timeout ?memory ?stack ?pattern ~paths ~provers ?remote ~loc
     (self:t) : _ =
   let provers = CCList.map (find_prover' self) provers in
-  let dirs = CCList.map (mk_subdir self) paths in
+  let dirs = CCList.map (mk_subdir ?remote_info:remote self) paths in
   let limits = mk_limits ?timeout ?memory ?stack () in
-  let act = { Action.j; limits; dirs; provers; pattern; loc } in
+  let act = { Action.j; limits; dirs; provers; pattern; remote; loc } in
   act
 
 let rec mk_action (self:t) (a:Stanza.action) : _ =
   match a with
-  | Stanza.A_run_provers {provers; memory; dirs; timeout; stack; pattern; loc } ->
+  | Stanza.A_run_provers {provers; memory; dirs; timeout; stack; pattern; remote; loc } ->
     let a =
       mk_run_provers
-        ?timeout ?memory ?stack ?pattern ~loc:(Some loc) ~paths:dirs ~provers self
+        ?timeout ?memory ?stack ?pattern ~loc:(Some loc) ~paths:dirs ~provers ?remote self
     in
     Action.Act_run_provers a
   | Stanza.A_progn l ->
@@ -220,16 +248,16 @@ let add_stanza_ (st:Stanza.t) self : t =
 
   | St_dir {path;expect;pattern;loc} ->
     Log.debug (fun k->k"cur dir: '%s'" self.cur_dir);
-    let path = norm_path ~cur_dir:self.cur_dir path in
-    if Sys.file_exists path && Sys.is_directory path then () else (
-      Error.failf ~loc "%S is not a directory (cur_dir: %S)" path self.cur_dir
+    let abs_path = norm_path ~cur_dir:self.cur_dir path in
+    if Sys.file_exists abs_path && Sys.is_directory abs_path then () else (
+      Error.failf ~loc "%S is not a directory (cur_dir: %S)" abs_path self.cur_dir
     );
     let expect =
       match expect with
       | None -> Dir.E_comment
       | Some e -> conv_expect self e
     in
-    let d = {Dir.path; expect; loc; pattern} in
+    let d = {Dir.path = abs_path; orig_path = path; expect; loc; pattern} in
     add_dir d self
 
   | St_prover {

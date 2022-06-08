@@ -11,12 +11,14 @@ type check_res = (Prover.name * Proof_checker.name, Proof_check_res.t) Run_resul
 val run :
   limits:Limit.All.t ->
   proof_file:string option ->
+  ?remote_info: Remote_info.t ->
   Prover.t ->
   Problem.t ->
   job_res
 
 val run_proof_check :
   limits:Limit.All.t ->
+  ?remote_info: Remote_info.t ->
   Prover.t ->
   Proof_checker.t ->
   Problem.t ->

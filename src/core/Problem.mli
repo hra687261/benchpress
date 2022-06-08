@@ -14,11 +14,13 @@ val make : string -> Res.t -> t
 val find_expect :
   ?default_expect:Res.t ->
   expect:Dir.expect ->
+  ?remote_info:Remote_info.t ->
   path ->
   Res.t
 (** FInd the expected result for this given problem *)
 
 val make_find_expect :
+  ?remote_info:Remote_info.t ->
   expect:Dir.expect ->
   path ->
   t

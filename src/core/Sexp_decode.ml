@@ -327,6 +327,21 @@ module Fields = struct
     with E s ->
       fail_ (const "expected a pair") s
 
+  let get_map_of_list_hd_tl l =
+    let exception E of sexp in
+    try
+      Ok
+        (List.fold_left
+           (fun m kv -> match kv.S.view with
+              | S.List [{S.view=S.Atom k;_} as k_val; v] ->
+                Str_map.add k (k_val,v) m
+              | S.List ({S.view=S.Atom k;_} as k_val :: ( _ :: _  as _tl_vals)) ->
+                Str_map.add k (k_val,kv) m
+              | _ -> raise_notrace (E kv))
+           Str_map.empty l)
+    with E s ->
+      fail_ (const "expected at least two atoms") s
+
   let get_map_ s : (_ Str_map.t,_) result =
     match s.S.view with
     | S.List l -> get_map_of_list_ l
@@ -340,6 +355,23 @@ module Fields = struct
           | Error _ as e -> e
         end
       | _ -> fail_ (fun ()->spf "expected (%s (_ _) (_ _) …)" name) s
+  }
+
+  let get_all_applied_opt name : t option m = {
+    run=fun s -> match s.S.view with
+      | S.List ({S.view=S.Atom name';_} :: l) when name = name' ->
+        begin match get_map_of_list_hd_tl l with
+          | Ok (m) -> Ok (Some {m; value=s})
+          | Error _ as e -> e
+        end
+      | _ -> Ok None
+  }
+
+  let get_all_applied name : t m = {
+    run=fun s -> match (get_all_applied_opt name).run s with
+      | Ok (Some res) -> Ok res
+      | _ ->
+        fail_ (fun ()->spf "expected (%s (_ _ …) (_ _ …) …)" name) s
   }
 
   let get : t m = {
@@ -388,3 +420,11 @@ end
 let fields = Fields.get
 
 let applied_fields = Fields.get_applied
+
+let all_applied_fields = Fields.get_all_applied
+
+let applied_fields_opt str dec =
+  let* m_opt = Fields.get_all_applied_opt str in
+  CCOption.map_or
+    ~default:(return None)
+    dec m_opt

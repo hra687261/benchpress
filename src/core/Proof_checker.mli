@@ -27,7 +27,9 @@ module Res = Proof_check_res
 
 val run :
   ?limits:Limit.All.t ->
-  problem:string -> proof_file:string ->
+  problem:string ->
+  proof_file:string ->
+  ?remote_info:Remote_info.t ->
   t ->
   Run_proc_result.t
 

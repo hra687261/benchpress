@@ -22,6 +22,7 @@ module Exec_run_provers : sig
     ?limits:Limit.All.t ->
     ?proof_dir:string ->
     ?interrupted:(unit -> bool) ->
+    ?remote_info: Remote_info.t ->
     Definitions.t ->
     t -> expanded
 
@@ -33,6 +34,7 @@ module Exec_run_provers : sig
     ?on_proof_check:(Test.proof_check_result -> unit) ->
     ?on_done:(Test_compact_result.t -> unit) ->
     ?interrupted:(unit -> bool) ->
+    ?remote_info: Remote_info.t ->
     uuid:Uuidm.t ->
     save:bool ->
     expanded ->
