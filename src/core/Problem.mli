@@ -12,6 +12,7 @@ val make : string -> Res.t -> t
 (** Make a problem. *)
 
 val find_expect :
+  ?slurm:bool ->
   ?default_expect:Res.t ->
   expect:Dir.expect ->
   path ->
@@ -19,6 +20,7 @@ val find_expect :
 (** FInd the expected result for this given problem *)
 
 val make_find_expect :
+  ?slurm:bool ->
   expect:Dir.expect ->
   path ->
   t

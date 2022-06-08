@@ -26,6 +26,7 @@ val make_cmd :
 module Res = Proof_check_res
 
 val run :
+  ?slurm:bool ->
   ?limits:Limit.All.t ->
   problem:string -> proof_file:string ->
   t ->

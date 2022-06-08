@@ -53,7 +53,7 @@ module Exp_ = struct
 end
 
 (* find expected result for [file] *)
-let find_expect ?default_expect ~expect file : Res.t =
+let find_expect ?(slurm = false) ?default_expect ~expect file : Res.t =
   Logs.debug ~src:src_log
     (fun k->k "(@[<2>find_expect `%s`@ using %a@])…" file Dir.pp_expect expect);
   let rec loop expect =
@@ -71,7 +71,7 @@ let find_expect ?default_expect ~expect file : Res.t =
       in
       try_ l
     | Dir.E_program {prover} ->
-      let raw = Prover.run prover ~file
+      let raw = Prover.run ~slurm prover ~file
           ~limits:(Limit.All.mk
                      ~time:(Limit.Time.mk ~s:1 ())
                      ~memory:(Limit.Memory.mk ~m:200 ())
@@ -85,8 +85,8 @@ let find_expect ?default_expect ~expect file : Res.t =
   in
   loop expect
 
-let make_find_expect ~expect file : t =
-  let expect = find_expect ~expect file in
+let make_find_expect ?(slurm = false) ~expect file : t =
+  let expect = find_expect ~slurm ~expect file in
   make file expect
 
 let compare_res pb res =

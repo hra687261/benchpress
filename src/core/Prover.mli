@@ -112,6 +112,7 @@ val make_command :
   string
 
 val run :
+  ?slurm:bool ->
   ?env:(string * string) array ->
   ?proof_file:string ->
   limits:Limit.All.t ->

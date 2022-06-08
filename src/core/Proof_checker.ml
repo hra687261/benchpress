@@ -46,14 +46,16 @@ let make_cmd ?env ~problem ~proof_file (self:t) : string =
       "cannot make command for proof_checker %s:@ cannot find field %s"
       self.name s
 
-let run ?(limits=Limit.All.default) ~problem ~proof_file (self:t) =
+let run ?(slurm = false) ?(limits=Limit.All.default) ~problem ~proof_file (self:t) =
   let cmd = make_cmd ~problem ~proof_file self in
   let ulimit = Ulimit.mk ~time:true ~memory:true ~stack:true in
   let prefix = Ulimit.cmd ~conf:ulimit ~limits:(
       Limit.All.update_time (CCOpt.map Limit.Time.(add (mk ~s:1 ()))) limits
     ) in
   let cmd = Ulimit.prefix_cmd ?prefix ~cmd () in
-  Run_proc.run cmd
+  if slurm
+  then Run_proc.run (Slurm_cmd.srun (Slurm_cmd.bash cmd))
+  else Run_proc.run cmd
 
 let analyze_res (self:t) (res:Run_proc_result.t) : Res.t option =
   let find_ re =

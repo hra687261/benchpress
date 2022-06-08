@@ -17,6 +17,7 @@ module Exec_run_provers : sig
   }
 
   val expand :
+    ?slurm:bool ->
     ?j:int ->
     ?dyn:bool ->
     ?limits:Limit.All.t ->
@@ -26,6 +27,7 @@ module Exec_run_provers : sig
     t -> expanded
 
   val run :
+    ?slurm:bool ->
     ?timestamp:float ->
     ?on_start:(expanded -> unit) ->
     ?on_solve:(Test.result -> unit) ->

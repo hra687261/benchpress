@@ -30,6 +30,7 @@ module Exec_run_provers : sig
   }
 
   val expand :
+    ?slurm:bool ->
     ?j:int ->
     ?dyn:bool ->
     ?limits:Limit.All.t ->
@@ -39,6 +40,7 @@ module Exec_run_provers : sig
     t -> expanded
 
   val run :
+    ?slurm:bool ->
     ?timestamp:float ->
     ?on_start:(expanded -> unit) ->
     ?on_solve:(Test.result -> unit) ->
@@ -76,7 +78,7 @@ end = struct
       (fun path -> Re.execp re path)
 
   (* turn a subdir into a list of problems *)
-  let expand_subdir ?pattern ?(interrupted=fun _->false)
+  let expand_subdir ?(slurm = false) ?pattern ?(interrupted=fun _->false)
       ~dyn (s:Subdir.t) : Problem.t list =
     Error.guard (Error.wrapf "expand_subdir of_dir %a" Subdir.pp s) @@ fun() ->
     try
@@ -105,7 +107,9 @@ end = struct
                    !n_done n_files (Misc.truncate_left 30 path);
                )
            );
-           let res =Problem.make_find_expect path ~expect:s.Subdir.inside.expect in
+           let res =
+             Problem.make_find_expect ~slurm path ~expect:s.Subdir.inside.expect
+           in
            incr n_done;
            res)
         with
@@ -113,7 +117,7 @@ end = struct
         | exn -> Error.(raise @@ of_exn exn)
 
   (* Expand options into concrete choices *)
-  let expand ?j ?(dyn=false) ?limits ?proof_dir ?interrupted
+  let expand ?(slurm = false) ?j ?(dyn=false) ?limits ?proof_dir ?interrupted
       (defs:Definitions.t) (self:t) : expanded =
     let limits = match limits with
       | None -> self.limits
@@ -121,7 +125,7 @@ end = struct
     in
     let j = j >?? self.j >? Misc.guess_cpu_count () in
     let problems = CCList.flat_map
-        (expand_subdir ?pattern:self.pattern ~dyn ?interrupted) self.dirs in
+        (expand_subdir ~slurm ?pattern:self.pattern ~dyn ?interrupted) self.dirs in
     let checkers =
       Definitions.all_checkers defs
       |> List.map (fun c -> let c=c.With_loc.view in c.Proof_checker.name, c)
@@ -150,7 +154,7 @@ end = struct
         ~f
     | _ -> f ()
 
-  let run ?(timestamp=Misc.now_s())
+  let run ?(slurm = false) ?(timestamp=Misc.now_s())
       ?(on_start=_nop) ?(on_solve = _nop) ?(on_start_proof_check=_nop)
       ?(on_proof_check = _nop) ?(on_done = _nop)
       ?(interrupted=fun _->false)
@@ -217,7 +221,7 @@ end = struct
       with_proof_file_opt ~proof_file ~keep @@ fun () ->
 
       let result =
-        Run_prover_problem.run ~limits:self.limits ~proof_file
+        Run_prover_problem.run ~slurm ~limits:self.limits ~proof_file
           prover pb
       in
       (* insert into DB here *)
@@ -244,7 +248,7 @@ end = struct
 
           let res =
             let limits = Limit.All.mk ~time:(Limit.Time.mk ~h:1 ()) () in
-            Run_prover_problem.run_proof_check ~limits
+            Run_prover_problem.run_proof_check ~slurm ~limits
               ~proof_file:pfile prover checker pb
           in
           let ev_checker = Run_event.mk_checker res in

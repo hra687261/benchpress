@@ -4,14 +4,14 @@ module T = Test
 module Log = (val Logs.src_log (Logs.Src.create "benchpress.run-main"))
 
 (* run provers on the given dirs, return a list [prover, dir, results] *)
-let execute_run_prover_action
+let execute_run_prover_action ?(slurm = false)
     ?j ?timestamp ?pp_results ?dyn ?limits ?proof_dir ~notify ~uuid ~save
     (defs: Definitions.t) (r:Action.run_provers)
   : (_ * Test_compact_result.t) =
   begin
     Error.guard (Error.wrapf "run prover action@ `@[%a@]`" Action.pp_run_provers r) @@ fun () ->
     let interrupted = CCLock.create false in
-    let r = Exec_action.Exec_run_provers.expand ?dyn ?j ?proof_dir ?limits defs r in
+    let r = Exec_action.Exec_run_provers.expand ~slurm ?dyn ?j ?proof_dir ?limits defs r in
     let len = List.length r.problems in
     Notify.sendf notify "testing with %d provers, %d problems…"
       (List.length r.provers) len;
@@ -20,7 +20,7 @@ let execute_run_prover_action
     (* solve *)
     let result =
       Error.guard (Error.wrapf "running %d tests" len) @@ fun () ->
-      Exec_action.Exec_run_provers.run ~uuid ?timestamp
+      Exec_action.Exec_run_provers.run ~slurm ~uuid ?timestamp
         ~interrupted:(fun () -> CCLock.get interrupted)
         ~on_solve:progress#on_res ~save
         ~on_start_proof_check:(fun() -> progress#on_start_proof_check)
@@ -34,7 +34,7 @@ type top_task =
   | TT_run_provers of Action.run_provers * Definitions.t
   | TT_other of Action.t
 
-let main ?j ?pp_results ?dyn ?timeout ?memory ?csv ?(provers=[])
+let main ?(slurm = false) ?j ?pp_results ?dyn ?timeout ?memory ?csv ?(provers=[])
     ?meta:_ ?summary ?task ?dir_file ?proof_dir ?(save=true)
     (defs:Definitions.t) paths () : unit =
   Log.info
@@ -91,7 +91,7 @@ let main ?j ?pp_results ?dyn ?timeout ?memory ?csv ?(provers=[])
       let uuid = Misc.mk_uuid() in
 
       let (top_res, (results:Test_compact_result.t)) =
-        execute_run_prover_action
+        execute_run_prover_action ~slurm
           ~uuid ?pp_results ?proof_dir ?dyn:progress ~limits ?j ~notify ~timestamp ~save
           defs run_provers_action
       in

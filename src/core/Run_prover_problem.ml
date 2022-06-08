@@ -9,7 +9,7 @@ type job_res= (Prover.name, Res.t) Run_result.t
 type check_res = (Prover.name * Proof_checker.name, Proof_check_res.t) Run_result.t
 
 (* run one particular test *)
-let run ~limits ~proof_file prover pb : _ Run_result.t =
+let run ?(slurm = false) ~limits ~proof_file prover pb : _ Run_result.t =
   Error.guard (Error.wrapf "run prover '%s' on problem '%s' (proof file %a)"
                  prover.Prover.name pb.Problem.name
                  Fmt.Dump.(option string) proof_file) @@ fun () ->
@@ -21,7 +21,7 @@ let run ~limits ~proof_file prover pb : _ Run_result.t =
         prover.Prover.name pb.Problem.name Limit.Time.pp timeout);
   Log.debug (fun k->k"proof file: %a" Fmt.Dump.(option string) proof_file);
   (* spawn process *)
-  let raw = Prover.run ?proof_file ~limits ~file:pb.Problem.name prover in
+  let raw = Prover.run ~slurm ?proof_file ~limits ~file:pb.Problem.name prover in
   let result =
     Run_result.make_from_prover prover ~timeout pb raw
   in
@@ -33,14 +33,14 @@ let run ~limits ~proof_file prover pb : _ Run_result.t =
          raw.stdout raw.stderr raw.errcode);
   result
 
-let run_proof_check ~limits prover checker pb ~proof_file : check_res =
+let run_proof_check ?(slurm = false) ~limits prover checker pb ~proof_file : check_res =
   Error.guard (Error.wrapf "run checker '%s' on proof file '%s' (problem '%s', prover '%s')"
                  checker.Proof_checker.name proof_file pb.Problem.name
                  prover.Prover.name) @@ fun () ->
   Profile.with_ "run-checker" ~args:["checker",checker.name] @@ fun () ->
 
   let raw =
-    Proof_checker.run ~limits ~problem:pb.Problem.name ~proof_file checker
+    Proof_checker.run ~slurm ~limits ~problem:pb.Problem.name ~proof_file checker
   in
   let res = Run_result.make_from_checker prover checker
       ~timeout:Limit.Time.default pb raw

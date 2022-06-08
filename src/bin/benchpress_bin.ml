@@ -17,15 +17,17 @@ module Run = struct
   (* sub-command for running tests *)
   let cmd =
     let open Cmdliner in
-    let aux j pp_results dyn paths dir_file proof_dir defs task timeout memory
-        meta provers csv summary no_color save =
+    let aux slurm j pp_results dyn paths dir_file proof_dir defs task timeout
+        memory meta provers csv summary no_color save =
       catch_err @@ fun () ->
       if no_color then CCFormat.set_color_default false;
       let dyn = if dyn then Some true else None in
-      Run_main.main ~pp_results ?dyn ~j ?timeout ?memory ?csv ~provers
+      Run_main.main ~slurm ~pp_results ?dyn ~j ?timeout ?memory ?csv ~provers
         ~meta ?task ?summary ?dir_file ?proof_dir ~save defs paths ()
     in
     let defs = Bin_utils.definitions_term
+    and slurm =
+      Arg.(value & flag & info ["slurm"] ~doc:"run the shell commands using slurm's srun command")
     and dyn =
       Arg.(value & flag & info ["progress"] ~doc:"print progress bar")
     and pp_results =
@@ -61,7 +63,7 @@ module Run = struct
       Arg.(value & opt (some string) None & info ["summary"] ~doc:"write summary in FILE")
     in
     Cmd.v (Cmd.info ~doc "run")
-      (Term.(const aux $ j $ pp_results $ dyn $ paths
+      (Term.(const aux $ slurm $ j $ pp_results $ dyn $ paths
              $ dir_file $ proof_dir $ defs $ task $ timeout $ memory
              $ meta $ provers $ csv $ summary $ no_color $ save))
 end

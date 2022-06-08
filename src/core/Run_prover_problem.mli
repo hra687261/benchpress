@@ -9,6 +9,7 @@ type check_res = (Prover.name * Proof_checker.name, Proof_check_res.t) Run_resul
 
 (** Run this prover on this problem. *)
 val run :
+  ?slurm:bool ->
   limits:Limit.All.t ->
   proof_file:string option ->
   Prover.t ->
@@ -16,6 +17,7 @@ val run :
   job_res
 
 val run_proof_check :
+  ?slurm:bool ->
   limits:Limit.All.t ->
   Prover.t ->
   Proof_checker.t ->
