@@ -17,13 +17,13 @@ module Run = struct
   (* sub-command for running tests *)
   let cmd =
     let open Cmdliner in
-    let aux j pp_results dyn paths dir_file proof_dir defs task timeout memory
+    let aux j pp_results dyn paths dir_file db_file pb_file proof_dir defs task timeout memory
         meta provers csv summary no_color save =
       catch_err @@ fun () ->
       if no_color then CCFormat.set_color_default false;
       let dyn = if dyn then Some true else None in
       Run_main.main ~pp_results ?dyn ~j ?timeout ?memory ?csv ~provers
-        ~meta ?task ?summary ?dir_file ?proof_dir ~save defs paths ()
+        ~meta ?task ?summary ?dir_file ?db_file ?pb_file ?proof_dir ~save defs paths ()
     in
     let defs = Bin_utils.definitions_term
     and dyn =
@@ -34,6 +34,10 @@ module Run = struct
       Arg.(value & opt bool true & info ["save"] ~doc:"save results on disk")
     and dir_file =
       Arg.(value & opt (some string) None & info ["F"] ~doc:"file containing a list of files")
+    and db_file =
+      Arg.(value & opt (some string) None & info ["db-file"] ~doc:"file in which to store the database")
+    and pb_file =
+      Arg.(value & opt (some string) None & info ["pb-file"] ~doc:"file contaning a hashconsed list of problems")
     and proof_dir =
       Arg.(value & opt (some string) None & info ["proof-dir"] ~doc:"store proofs in given directory")
     and task =
@@ -62,8 +66,64 @@ module Run = struct
     in
     Cmd.v (Cmd.info ~doc "run")
       (Term.(const aux $ j $ pp_results $ dyn $ paths
-             $ dir_file $ proof_dir $ defs $ task $ timeout $ memory
+             $ dir_file $ db_file $ pb_file $ proof_dir $ defs $ task $ timeout $ memory
              $ meta $ provers $ csv $ summary $ no_color $ save))
+end
+
+module Slurm = struct
+
+  let cmd =
+    let open Cmdliner in
+    let aux j paths dir_file proof_dir
+        defs task timeout memory provers csv summary no_color
+        db_file nodes ntasks cpus_per_task =
+      catch_err @@ fun () ->
+      if no_color then CCFormat.set_color_default false;
+      Run_main.main  ~sbatch:true ~j ?timeout ?memory ?csv ~provers
+        ?summary ?task ?dir_file ?proof_dir
+        ~save:true (* this mode always saves the resulting db on disk *)
+        ?db_file ?nodes ?ntasks ?cpus_per_task
+        defs paths ()
+    in
+    let defs = Bin_utils.definitions_term
+    and dir_file =
+      Arg.(value & opt (some string) None & info ["F"] ~doc:"file containing a list of files")
+    and db_file =
+      Arg.(value & opt (some string) None & info ["db-file"] ~doc:"the file in which to store the resulting database")
+    and proof_dir =
+      Arg.(value & opt (some string) None & info ["proof-dir"] ~doc:"store proofs in given directory")
+    and task =
+      Arg.(value & opt (some string) None & info ["task"] ~doc:"task to run")
+    and timeout =
+      Arg.(value & opt (some int) None & info ["t"; "timeout"] ~doc:"timeout (in s)")
+    and j =
+      Arg.(value & opt int 1 & info ["j"] ~doc:"number of threads each parallel execution of benchpress can launch")
+    and memory =
+      Arg.(value & opt (some int) None & info ["m"; "memory"] ~doc:"memory (in MB)")
+    and doc =
+      "run benchpress using the computing power of a cluster using slurm"
+    and csv =
+      Arg.(value & opt (some string) None & info ["csv"] ~doc:"CSV output file")
+    and paths =
+      Arg.(value & pos_all string [] &
+           info [] ~docv:"PATH" ~doc:"target paths (or directories containing tests)")
+    and provers =
+      Arg.(value & opt_all string [] & info ["p"; "provers"] ~doc:"select provers")
+    and no_color =
+      Arg.(value & flag & info ["no-color"; "nc"] ~doc:"disable colored output")
+    and summary =
+      Arg.(value & opt (some string) None & info ["summary"] ~doc:"write summary in FILE")
+    and nodes =
+      Arg.(value & opt (some int) None & info ["nodes"] ~doc:"number of nodes to be used")
+    and ntasks =
+      Arg.(value & opt (some int) None & info ["ntasks"] ~doc:"number of parallel jobs to launch")
+    and cpus_per_task =
+      Arg.(value & opt (some int) None & info ["cpus-per-task"] ~doc:"number of cpus to assing to each benchpress task")
+    in
+    Cmd.v (Cmd.info ~doc "slurm")
+      (Term.(const aux $ j $ paths $ dir_file $ proof_dir $ defs $ task
+             $ timeout $ memory $ provers $ csv $ summary $ no_color
+             $ db_file $ nodes $ ntasks $ cpus_per_task))
 end
 
 module List_files = struct
@@ -366,6 +426,7 @@ let parse_opt () =
     Task_list.cmd;
     Task_show.cmd;
     Plot.cmd;
+    Slurm.cmd;
   ] in
   Cmd.eval_value (Cmd.group info ~default cmds)
 

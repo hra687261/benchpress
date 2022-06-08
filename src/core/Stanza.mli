@@ -28,6 +28,23 @@ type git_fetch = GF_fetch | GF_pull
 
 type action =
   | A_run_provers of {
+      db_file: string option;
+      pb_file: string option;
+      j: int option;
+      dirs: string list; (* list of directories to examine *)
+      pattern: regex option;
+      provers: string list;
+      timeout: int option;
+      memory: int option;
+      stack : stack_limit option;
+      loc: Loc.t;
+    }
+  | A_run_provers_slurm of {
+      nodes: int option;
+      ntasks: int option;
+      cpus_per_task: int option;
+      db_file: string option;
+      j: int option;
       dirs: string list; (* list of directories to examine *)
       pattern: regex option;
       provers: string list;

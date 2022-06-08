@@ -7,18 +7,13 @@ module Log = (val Logs.src_log (Logs.Src.create "benchpress.runexec-action"))
 (** File for results with given uuid and timestamp *)
 let db_file_for_uuid ~timestamp (uuid:Uuidm.t) : string =
   let filename =
-    Printf.sprintf "res-%s-%s.sqlite"
-      (match Ptime.of_float_s timestamp with
-       | None -> Printf.sprintf "<time %.1fs>" timestamp
-       | Some t -> Misc.datetime_compact t)
-      (Uuidm.to_string uuid)
+    Misc.mk_uniq_filename ~pref:"res-" ~ext:".sqlite" timestamp uuid
   in
   let data_dir = Filename.concat (Xdg.data_dir ()) !(Xdg.name_of_project) in
   (try Unix.mkdir data_dir 0o744 with _ -> ());
   Filename.concat data_dir filename
 
 module Exec_run_provers : sig
-  type t = Action.run_provers
 
   type expanded = {
     j: int;
@@ -27,6 +22,7 @@ module Exec_run_provers : sig
     checkers: Proof_checker.t Misc.Str_map.t;
     limits : Limit.All.t;
     proof_dir: string option; (* directory in which to store proofs *)
+    db_file: string option; (* file in which to store the database *)
   }
 
   val expand :
@@ -36,7 +32,14 @@ module Exec_run_provers : sig
     ?proof_dir:string ->
     ?interrupted:(unit -> bool) ->
     Definitions.t ->
-    t -> expanded
+    ?pb_file:string ->
+    ?db_file:string ->
+    Limit.All.t ->
+    int option ->
+    string option ->
+    Subdir.t list ->
+    Prover.t list ->
+    expanded
 
   val run :
     ?timestamp:float ->
@@ -55,8 +58,26 @@ module Exec_run_provers : sig
         @param on_solve called whenever a single problem is solved
         @param on_done called when the whole process is done
     *)
+
+  val run_sbatch_job :
+    ?timestamp:float ->
+    ?on_start:(expanded -> unit) ->
+    ?on_solve:(Test.result -> unit) ->
+    ?on_start_proof_check:(unit -> unit) ->
+    ?on_proof_check:(Test.proof_check_result -> unit) ->
+    ?on_done:(Test_compact_result.t -> unit) ->
+    ?interrupted:(unit -> bool) ->
+    ?config_file:string ->
+    ?nodes:int ->
+    ?ntasks:int ->
+    ?cpus_per_task:int ->
+    ?db_file:string ->
+    uuid:Uuidm.t ->
+    save:bool ->
+    expanded ->
+    Test_top_result.t lazy_t * Test_compact_result.t
+
 end = struct
-  type t = Action.run_provers
   let (>?) a b = match a with None -> b | Some x -> x
   let (>??) a b = match a with None -> b | Some _ as x -> x
 
@@ -67,6 +88,7 @@ end = struct
     checkers: Proof_checker.t Misc.Str_map.t;
     limits : Limit.All.t;
     proof_dir: string option; (* directory in which to store proofs *)
+    db_file: string option; (* file in which to store the database *)
   }
 
   let filter_regex_ = function
@@ -113,22 +135,27 @@ end = struct
         | exn -> Error.(raise @@ of_exn exn)
 
   (* Expand options into concrete choices *)
-  let expand ?j ?(dyn=false) ?limits ?proof_dir ?interrupted
-      (defs:Definitions.t) (self:t) : expanded =
+  let expand ?j ?(dyn=false) ?limits ?proof_dir ?interrupted defs
+      ?pb_file ?db_file s_limits s_j s_pattern s_dirs s_provers: expanded =
     let limits = match limits with
-      | None -> self.limits
-      | Some l -> Limit.All.with_defaults l ~defaults:self.limits
+      | None -> s_limits
+      | Some l -> Limit.All.with_defaults l ~defaults:s_limits
     in
-    let j = j >?? self.j >? Misc.guess_cpu_count () in
-    let problems = CCList.flat_map
-        (expand_subdir ?pattern:self.pattern ~dyn ?interrupted) self.dirs in
+    let j = j >?? s_j >? Misc.guess_cpu_count () in
+    let pbfl =
+      match pb_file with
+      | Some pbf -> Problem.pb_list_of_file pbf
+      | None -> [] in
+    let problems =
+      pbfl @
+      CCList.flat_map
+        (expand_subdir ?pattern:s_pattern ~dyn ?interrupted) s_dirs in
     let checkers =
       Definitions.all_checkers defs
       |> List.map (fun c -> let c=c.With_loc.view in c.Proof_checker.name, c)
       |> Misc.Str_map.of_list
     in
-    { j; limits; problems; checkers; proof_dir;
-      provers=self.provers; }
+    { j; limits; problems; checkers; proof_dir; db_file; provers=s_provers; }
 
   let _nop _ = ()
 
@@ -150,17 +177,19 @@ end = struct
         ~f
     | _ -> f ()
 
-  let run ?(timestamp=Misc.now_s())
-      ?(on_start=_nop) ?(on_solve = _nop) ?(on_start_proof_check=_nop)
-      ?(on_proof_check = _nop) ?(on_done = _nop)
-      ?(interrupted=fun _->false)
-      ~uuid ~save
-      (self:expanded) : _*_ =
-    let start = Misc.now_s() in
-    (* prepare DB *)
+  let get_db_file ?db_file timestamp uuid =
+    match db_file with
+    | Some f ->
+      Misc.Shell.empty_file f; f
+    | None ->
+      db_file_for_uuid ~timestamp uuid
+
+  let prepare_db ?db_file timestamp uuid save provers =
     let db =
       if save then (
-        let db_file = db_file_for_uuid ~timestamp uuid in
+        let db_file =
+          get_db_file ?db_file timestamp uuid
+        in
         Sqlite3.db_open ~mutex:`FULL db_file
       ) else
         Sqlite3.db_open ":memory:"
@@ -180,8 +209,18 @@ end = struct
        n_results=0; dirs=[]; provers=[]};
     begin
       Error.guard (Error.wrap "inserting provers into DB") @@ fun () ->
-      List.iter (Prover.to_db db) self.provers;
+      List.iter (Prover.to_db db) provers;
     end;
+    db
+
+  let run ?(timestamp=Misc.now_s())
+      ?(on_start=_nop) ?(on_solve = _nop) ?(on_start_proof_check=_nop)
+      ?(on_proof_check = _nop) ?(on_done = _nop)
+      ?(interrupted=fun _->false)
+      ~uuid ~save
+      (self:expanded) : _*_ =
+    let start = Misc.now_s() in
+    let db = prepare_db ?db_file:self.db_file timestamp uuid save self.provers in
     on_start self;
 
     CCOpt.iter Misc.mkdir_rec self.proof_dir;
@@ -302,6 +341,174 @@ end = struct
     Logs.debug (fun k->k "closing db…");
     ignore (Sqlite3.db_close db : bool);
     top_res, r
+
+  let mk_sbatch_script ?config_file ?nodes ?ntasks ?cpus_per_task ?j ?(provers: Prover.t list = [])
+      (cmd_files: (string * string) list) =
+    let aux name opt acc =
+      CCOption.map_or ~default:acc
+        (fun v -> (name, Some v)::acc)
+        opt
+    in
+    let aux_int name opt acc =
+      CCOption.map_or ~default:acc
+        (fun v -> (name, Some (Int.to_string v))::acc)
+        opt
+    in
+    ignore ntasks;
+    let sbatch_options =
+      ("--wait", None) ::
+      ( aux_int "--ntasks" ntasks @@
+        aux_int "--nodes" nodes []
+      )
+    in
+    let srun_options =
+      aux_int "--ntasks" (Some 1) @@
+      aux_int "--nodes" (Some 1) @@
+      CCOption.map_or ~default:[] (
+        fun v ->
+          if v > 1
+          then aux_int "--cpus-per-task" (Some v) []
+          else []
+      ) cpus_per_task
+    in
+    let provers_opt =
+      List.map (fun Prover.{ name; _ } -> "-p", Some name) provers
+    in
+
+    let rec aux_f l =
+      match l with
+      | (pb_file, db_file) :: t ->
+        let bp_options =
+          ("run", None) :: (
+            aux_int "-j" j @@
+            aux "--config" config_file (
+              ("--pp-results", Some "false") ::
+              ("--pb-file", Some pb_file) ::
+              ("--db-file", Some db_file) ::
+              provers_opt
+            )
+          )
+        in
+        let bp_cmd =
+          Misc.Shell.mk_cmd Sys.executable_name ~options:bp_options
+        in
+        (Slurm_cmd.srun bp_cmd ~options:srun_options, t = []) :: aux_f t
+      | [] -> []
+    in
+    let cmds = List.rev (aux_f cmd_files) in
+    Slurm_cmd.sbatch_script ~options:sbatch_options cmds
+
+  let join_db_tables
+      dest_file (dbfl: (string * string) list) =
+    let mk_cmd fsrc fdest =
+      Format.sprintf
+        "sqlite3 %s <<EOF\n\
+         attach database \"%s\" as source;\n\
+         insert into prover_res select * from source.prover_res;\n\
+         insert into proof_check_res select * from source.proof_check_res;\n\
+         EOF"
+        fdest fsrc
+    in
+    let rec aux srcl dest =
+      match srcl with
+      | (_, db_file) :: tl ->
+        let cmd = mk_cmd db_file dest in
+        let res = Run_proc.run cmd in
+        if res.errcode <> 0
+        then Error.fail (
+            Format.sprintf
+              "The joining of the database \"%s\" and \"%s\" failed:\n%s"
+              db_file dest res.stderr
+          );
+        aux tl dest
+      | [] -> dest
+    in
+    match dbfl with
+    | (_, db_file) :: t ->
+      Misc.Shell.copy db_file dest_file;
+      aux t dest_file
+    | [] -> Error.fail "No databases were provided to join"
+
+  let rm_files script_file cmd_files =
+    let aux (pb_file, db_file) =
+      Misc.Shell.rm db_file;
+      Misc.Shell.rm pb_file
+    in
+    Misc.Shell.rm script_file;
+    List.iter aux cmd_files
+
+  let run_sbatch_job
+      ?(timestamp=Misc.now_s())
+      ?(on_start=_nop)
+      ?(on_solve = _nop)
+      ?(on_start_proof_check=_nop)
+      ?(on_proof_check = _nop)
+      ?(on_done = _nop)
+      ?(interrupted=fun _->false)
+      ?config_file ?nodes ?ntasks ?cpus_per_task ?db_file
+      ~uuid ~save (self:expanded) : _*_ =
+    ignore (save, interrupted, on_start, on_solve, on_start_proof_check, on_proof_check);
+
+    let pbll =
+      Misc.split_list self.problems (CCOpt.get_or ~default:1 ntasks)
+    in
+    let data_dir = Filename.concat (Xdg.data_dir ()) !(Xdg.name_of_project) in
+    (try Unix.mkdir data_dir 0o744 with _ -> ());
+    let f_uniq_id =
+      Misc.mk_uniq_filename timestamp uuid
+    in
+    let aux_mk_uniq_filename pref ext =
+      data_dir ^ pref ^ f_uniq_id ^ ext
+    in
+
+    let _, rev_cmd_files =
+      List.fold_left (
+        fun (n, accl) pbl ->
+          let db_file =
+            aux_mk_uniq_filename ("/dbf-" ^ Int.to_string n) ".sqlite"
+          in
+          let pb_file =
+            aux_mk_uniq_filename ("/pbf-" ^ Int.to_string n) ".data"
+          in
+          Misc.Shell.empty_file pb_file;
+          Misc.Shell.empty_file db_file;
+          Problem.pb_list_to_file pbl pb_file;
+          n + 1,
+          (pb_file, db_file) :: accl
+      ) (1, []) pbll
+    in
+    let cmd_files = List.rev rev_cmd_files in
+    let sbatch_script =
+      mk_sbatch_script ?config_file ?nodes ?ntasks ?cpus_per_task
+        ~j:self.j ~provers:self.provers cmd_files
+    in
+    let script_path = aux_mk_uniq_filename "/script-" ".sh" in
+    let oc = open_out script_path  in
+    CCIO.write_line oc sbatch_script;
+    close_out oc;
+
+    let sbatch_cmd = Slurm_cmd.sbatch script_path in
+    let res = Run_proc.run sbatch_cmd in
+    if res.errcode <> 0
+    then Error.fail (
+        Format.sprintf
+          "sbatch script submission failure:\n%s"
+          res.stderr
+      );
+
+    let db_dest_file = get_db_file ?db_file timestamp uuid in
+    Misc.Shell.empty_file db_dest_file;
+    let res_db = join_db_tables db_dest_file cmd_files in
+    let db = Sqlite3.db_open res_db in
+    let top_res = lazy ( Test_top_result.of_db db) in
+    let r = Test_compact_result.of_db db in
+    (* check output files before removing them *)
+    rm_files script_path cmd_files;
+    on_done r;
+    Logs.debug (fun k->k "closing db…");
+    ignore (Sqlite3.db_close db : bool);
+    top_res, r
+
 end
 
 type cb_progress = <
@@ -489,8 +696,9 @@ let rec run ?(save=true) ?interrupted ?cb_progress
     | Action.Act_run_provers r ->
       let is_dyn = CCOpt.get_or ~default:false @@ Definitions.option_progress defs in
       let r_expanded =
-        Exec_run_provers.expand ?interrupted ~dyn:is_dyn
-          ?j:(Definitions.option_j defs) defs r
+        Exec_run_provers.expand
+          ?interrupted ~dyn:is_dyn ?j:(Definitions.option_j defs)
+          ?pb_file:r.pb_file ?db_file:r.db_file defs r.limits r.j r.pattern r.dirs r.provers
       in
       let progress =
         Progress_run_provers.make ~pp_results:true ~dyn:is_dyn
@@ -503,6 +711,39 @@ let rec run ?(save=true) ?interrupted ?cb_progress
           ~on_proof_check:progress#on_proof_check_res
           ~on_done:(fun _ -> progress#on_done) ~save
           ~timestamp:(Misc.now_s()) ~uuid r_expanded
+      in
+      Format.printf "task done: %a@." Test_compact_result.pp res;
+      ()
+    | Act_run_slurm_submission {
+        nodes; ntasks; cpus_per_task; db_file;
+        j; dirs; provers; pattern; limits; _
+      } ->
+      let is_dyn = CCOpt.get_or ~default:false @@ Definitions.option_progress defs in
+      let r_expanded =
+        Exec_run_provers.expand
+          ?interrupted ~dyn:is_dyn ?j:(Definitions.option_j defs)
+          ?db_file defs limits j pattern dirs provers
+      in
+      let progress =
+        Progress_run_provers.make ~pp_results:true ~dyn:is_dyn
+          ?cb_progress r_expanded
+      in
+      let uuid = Misc.mk_uuid () in
+      let config_file = Definitions.config_file defs in
+      let res =
+        Exec_run_provers.run_sbatch_job
+          ~timestamp:(Misc.now_s())
+          ?interrupted
+          ~on_solve:progress#on_res
+          ~on_proof_check:progress#on_proof_check_res
+          ~on_done:(fun _ -> progress#on_done) ~uuid
+          ~save
+          ?config_file
+          ?nodes
+          ?ntasks
+          ?cpus_per_task
+          ?db_file
+          r_expanded
       in
       Format.printf "task done: %a@." Test_compact_result.pp res;
       ()

@@ -342,3 +342,87 @@ module Json = struct
   let to_string (self:t) : string = Fmt.asprintf "%a" pp self
 end
 
+(** [split_list l n] splits the list l into at most n sublists *)
+let split_list l n =
+  let len = List.length l in
+  let divres = len / n in
+  let rec aux n rempb l acc lacc =
+    match l with
+    | h :: t when n = divres ->
+      if rempb > 0
+      then aux 0 (rempb - 1) t [] ((List.rev (h :: acc)) :: lacc)
+      else aux 1 0 t [h] (List.rev acc :: lacc)
+    | h :: t ->
+      aux (n + 1) rempb t (List.rev (h :: acc)) lacc
+    | [] when acc = [] ->
+      List.rev lacc
+    | [] ->
+      List.rev (acc :: lacc)
+  in
+  aux 0 (len mod n) l [] []
+
+(** Make a unique filename *)
+let mk_uniq_filename
+    ?(pref = "") ?(ext = "") timestamp uuid =
+  Format.sprintf "%s%s-%s%s" pref
+    (match Ptime.of_float_s timestamp with
+     | None -> Printf.sprintf "<time %.1fs>" timestamp
+     | Some t -> datetime_compact t)
+    (Uuidm.to_string uuid)
+    ext
+
+module Shell = struct
+  (** [mk_cmd ?options ?target exec] makes a command that executes [exec] with the options [options] on the target [target]. *)
+  let mk_cmd ?(options = []) ?target exec =
+    let buf = Buffer.create 32 in
+    Buffer.add_string buf exec;
+    List.iter (
+      fun (k, v_opt) ->
+        Buffer.add_string buf (
+          match v_opt with
+          | Some v -> " "^k^" "^v
+          | None -> " "^k
+        )
+    ) options;
+    CCOption.iter (
+      fun s ->
+        Buffer.add_string buf (" "^s)
+    ) target;
+    Buffer.contents buf
+
+  (** [copy src dest] copies the file in [src] to [dest]. *)
+  let copy src dest =
+    let cmd =
+      mk_cmd "cp" ~options:[ src, None; dest, None; ]
+    in
+    if Sys.command cmd <> 0
+    then Error.fail (
+        Format.sprintf
+          "Failed to copy the file \"%s\" to \"%s\""
+          src dest
+      )
+
+  (** [rm path] deletes the file located in [path]. *)
+  let rm path =
+    let ret =
+      Sys.command (mk_cmd "rm" ~target:path)
+    in
+    if ret <> 0
+    then Error.fail (
+        Format.sprintf
+          "Failed to delete the file \"%s\""
+          path
+      )
+
+  (** [empty_file path] Empties the file at [path] or creates an empty file if it doesn't exist. *)
+  let empty_file path =
+    let cmd =
+      mk_cmd "truncate" ~options:["-s", Some "0"] ~target:path
+    in
+    if Sys.command cmd <> 0
+    then Error.fail (
+        Format.sprintf
+          "Could not empty or create the file \"%s\""
+          path
+      )
+end

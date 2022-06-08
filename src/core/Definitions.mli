@@ -27,6 +27,7 @@ val to_iter : t -> (string * def) Iter.t
 val all_provers : t -> Prover.t with_loc list
 val all_checkers : t -> Proof_checker.t with_loc list
 val all_tasks : t -> Task.t with_loc list
+val config_file: t -> string option
 val custom_tags : t -> string list
 
 module Def : sig
@@ -53,6 +54,8 @@ val mk_run_provers :
   ?memory:int ->
   ?stack:Stanza.stack_limit ->
   ?pattern:string ->
+  ?db_file:string ->
+  ?pb_file:string ->
   paths:path list ->
   provers:string list ->
   loc:Loc.t option ->
@@ -62,6 +65,22 @@ val mk_run_provers :
     and directory paths.
     All the provers must be defined, and the paths must be contained
     in declared [dir]. *)
+
+val mk_run_provers_slurm_submission:
+  ?nodes:int ->
+  ?ntasks:int ->
+  ?cpus_per_task:int ->
+  ?db_file:string ->
+  ?j:int ->
+  paths:path list ->
+  ?timeout:int ->
+  ?memory:int ->
+  ?stack:Stanza.stack_limit ->
+  ?pattern:path ->
+  provers:path list ->
+  loc:Loc.t option ->
+  t ->
+  Action.run_provers_slurm_submission
 
 val completions : t -> ?before_pos:Loc.pos -> string -> def list
 (** Find possible completions *)

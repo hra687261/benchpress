@@ -5,7 +5,6 @@ type cb_progress = <
 >
 
 module Exec_run_provers : sig
-  type t = Action.run_provers
 
   type expanded = {
     j: int;
@@ -14,6 +13,7 @@ module Exec_run_provers : sig
     checkers: Proof_checker.t Misc.Str_map.t;
     limits : Limit.All.t;
     proof_dir: string option;
+    db_file: string option;
   }
 
   val expand :
@@ -23,7 +23,14 @@ module Exec_run_provers : sig
     ?proof_dir:string ->
     ?interrupted:(unit -> bool) ->
     Definitions.t ->
-    t -> expanded
+    ?pb_file:string ->
+    ?db_file:string ->
+    Limit.All.t ->
+    int option ->
+    string option ->
+    Subdir.t list ->
+    Prover.t list ->
+    expanded
 
   val run :
     ?timestamp:float ->
@@ -42,6 +49,25 @@ module Exec_run_provers : sig
         @param on_solve called whenever a single problem is solved
         @param on_done called when the whole process is done
     *)
+
+  val run_sbatch_job :
+    ?timestamp:float ->
+    ?on_start:(expanded -> unit) ->
+    ?on_solve:(Test.result -> unit) ->
+    ?on_start_proof_check:(unit -> unit) ->
+    ?on_proof_check:(Test.proof_check_result -> unit) ->
+    ?on_done:(Test_compact_result.t -> unit) ->
+    ?interrupted:(unit -> bool) ->
+    ?config_file:string ->
+    ?nodes:int ->
+    ?ntasks:int ->
+    ?cpus_per_task:int ->
+    ?db_file:string ->
+    uuid:Uuidm.t ->
+    save:bool ->
+    expanded ->
+    Test_top_result.t lazy_t * Test_compact_result.t
+
 end
 
 module Progress_run_provers : sig

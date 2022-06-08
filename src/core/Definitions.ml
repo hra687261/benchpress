@@ -80,6 +80,8 @@ let all_tasks self : _ list =
   |> Iter.filter_map (function D_task t -> Some t | _ -> None)
   |> Iter.to_rev_list
 
+let config_file { config_file; _ } = config_file
+
 (* compute a version for the prover *)
 let get_version ?(binary="") (v:Stanza.version_field) : Prover.version =
   begin match v with
@@ -170,24 +172,44 @@ let mk_limits ?timeout ?memory ?stack () =
     ) stack in
   Limit.All.mk ?time ?memory ?stack ()
 
-
-let mk_run_provers
-    ?j ?timeout ?memory ?stack ?pattern ~paths ~provers ~loc
-    (self:t) : _ =
+let mk_run_provers ?j ?timeout ?memory ?stack
+    ?pattern ?db_file ?pb_file ~paths ~provers ~loc
+    (self:t) : Action.run_provers =
   let provers = CCList.map (find_prover' self) provers in
   let dirs = CCList.map (mk_subdir self) paths in
   let limits = mk_limits ?timeout ?memory ?stack () in
-  let act = { Action.j; limits; dirs; provers; pattern; loc } in
-  act
+  Action.{ db_file; pb_file; j; limits; dirs; provers; pattern; loc }
+
+let map_stricly_positive_opt =
+  CCOpt.map_or ~default:None (CCOpt.if_ ((<) 0))
+
+let mk_run_provers_slurm_submission
+    ?nodes ?ntasks ?cpus_per_task ?db_file
+    ?j ~paths ?timeout ?memory ?stack ?pattern ~provers ~loc
+    (self:t) : Action.run_provers_slurm_submission =
+  let provers = CCList.map (find_prover' self) provers in
+  let dirs = CCList.map (mk_subdir self) paths in
+  let limits = mk_limits ?timeout ?memory ?stack () in
+  let nodes = map_stricly_positive_opt nodes in
+  let ntasks = map_stricly_positive_opt ntasks in
+  let cpus_per_task = map_stricly_positive_opt cpus_per_task in
+  { nodes; ntasks; cpus_per_task; db_file; j;
+    provers; dirs; pattern; limits; loc;
+  }
 
 let rec mk_action (self:t) (a:Stanza.action) : _ =
   match a with
-  | Stanza.A_run_provers {provers; memory; dirs; timeout; stack; pattern; loc } ->
+  | Stanza.A_run_provers {provers; memory; dirs; timeout; stack; pattern; j; pb_file; db_file; loc } ->
     let a =
-      mk_run_provers
-        ?timeout ?memory ?stack ?pattern ~loc:(Some loc) ~paths:dirs ~provers self
+      mk_run_provers ?j ?timeout ?memory ?stack ?pattern ~loc:(Some loc) ?pb_file ?db_file ~paths:dirs ~provers self
     in
     Action.Act_run_provers a
+  | Stanza.A_run_provers_slurm {provers; memory; dirs; timeout; stack; pattern; nodes; ntasks; cpus_per_task; j; db_file; loc } ->
+    let a =
+      mk_run_provers_slurm_submission ?j
+        ?timeout ?memory ?stack ?pattern ~loc:(Some loc) ?nodes ?ntasks ?cpus_per_task ?db_file ~paths:dirs ~provers self
+    in
+    Action.Act_run_slurm_submission a
   | Stanza.A_progn l ->
     let l = CCList.map (mk_action self) l in
     Action.Act_progn l

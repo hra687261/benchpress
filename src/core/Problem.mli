@@ -52,3 +52,8 @@ val pp : t Fmt.printer
 val name : t -> string
 val to_string : t -> string
 
+(** [pb_list_to_file l p] marshals the list of problems [l] and writes it into [p]. *)
+val pb_list_to_file: t list -> path -> unit
+
+(** [pb_list_of_file p] reads a marshalled list of problems from the file [p], unmarshals it and returns it.   *)
+val pb_list_of_file: path -> t list

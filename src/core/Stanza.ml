@@ -33,6 +33,23 @@ type git_fetch = GF_fetch | GF_pull
 
 type action =
   | A_run_provers of {
+      db_file: string option;
+      pb_file: string option;
+      j: int option;
+      dirs: string list; (* list of directories to examine *)
+      pattern: regex option;
+      provers: string list;
+      timeout: int option;
+      memory: int option;
+      stack : stack_limit option;
+      loc: Loc.t;
+    }
+  | A_run_provers_slurm of {
+      nodes: int option;
+      ntasks: int option;
+      cpus_per_task: int option;
+      db_file: string option;
+      j: int option;
       dirs: string list; (* list of directories to examine *)
       pattern: regex option;
       provers: string list;
@@ -145,14 +162,30 @@ let pp_stack_limit out = function
 let rec pp_action out =
   let open Misc.Pp in
   function
-  | A_run_provers {dirs;provers;timeout;memory;stack;pattern;loc=_} ->
-    Fmt.fprintf out "(@[<v>run_provers%a%a%a%a%a%a@])"
+  | A_run_provers {dirs;provers;timeout;memory;stack;pattern;j;pb_file;db_file;loc=_} ->
+    Fmt.fprintf out "(@[<v>run_provers%a%a%a%a%a%a%a%a%a@])"
       (pp_f "dirs" (pp_l pp_str)) dirs
       (pp_f "provers" (pp_l pp_str)) provers
       (pp_opt "pattern" pp_regex) pattern
       (pp_opt "timeout" Fmt.int) timeout
       (pp_opt "memory" Fmt.int) memory
       (pp_opt "stack" pp_stack_limit) stack
+      (pp_opt "pb_file" Fmt.string) pb_file
+      (pp_opt "db_file" Fmt.string) db_file
+      (pp_opt "j" Fmt.int) j
+  | A_run_provers_slurm {dirs;provers;timeout;memory;stack;pattern;nodes;ntasks;cpus_per_task;j;db_file;loc=_} ->
+    Fmt.fprintf out "(@[<v>run_provers%a%a%a%a%a%a%a%a%a%a%a@])"
+      (pp_f "dirs" (pp_l pp_str)) dirs
+      (pp_f "provers" (pp_l pp_str)) provers
+      (pp_opt "pattern" pp_regex) pattern
+      (pp_opt "timeout" Fmt.int) timeout
+      (pp_opt "memory" Fmt.int) memory
+      (pp_opt "stack" pp_stack_limit) stack
+      (pp_opt "nodes" Fmt.int) nodes
+      (pp_opt "ntasks" Fmt.int) ntasks
+      (pp_opt "cpus_per_task" Fmt.int) cpus_per_task
+      (pp_opt "db_file" Fmt.string) db_file
+      (pp_opt "j" Fmt.int) j
   | A_progn l -> Fmt.fprintf out "(@[progn %a@])" (pp_l pp_action) l
   | A_run_cmd {cmd=s;loc=_} -> Fmt.fprintf out "(@[run_cmd %a@])" pp_regex s
   | A_git_checkout {dir;ref;fetch_first;loc=_;} ->
@@ -316,13 +349,33 @@ let dec_action : action SD.t =
      let* m = applied_fields "run_provers" in
      let* dirs = Fields.field m "dirs" atom_or_atom_list in
      let* provers = Fields.field m "provers" atom_or_atom_list in
+     let* db_file = Fields.field_opt m "db_file" string in
+     let* pb_file = Fields.field_opt m "pb_file" string in
+     let* j = Fields.field_opt m "j" int in
      let* pattern = Fields.field_opt m "pattern" dec_regex in
      let* timeout = Fields.field_opt m "timeout" int in
      let* memory = Fields.field_opt m "memory" int in
      let* stack = Fields.field_opt m "stack" dec_stack_limit in
      let+ () = Fields.check_no_field_left m in
      let memory = Some (CCOpt.get_or ~default:10_000_000 memory) in
-     A_run_provers {dirs;provers;timeout;memory;stack;pattern;loc}
+     A_run_provers {dirs;provers;timeout;memory;stack;pattern;j;pb_file;db_file;loc}
+    );
+    (is_applied "run_provers_slurm",
+     let* m = applied_fields "run_provers_slurm" in
+     let* dirs = Fields.field m "dirs" atom_or_atom_list in
+     let* provers = Fields.field m "provers" atom_or_atom_list in
+     let* db_file = Fields.field_opt m "db_file" string in
+     let* j = Fields.field_opt m "j" int in
+     let* pattern = Fields.field_opt m "pattern" dec_regex in
+     let* timeout = Fields.field_opt m "timeout" int in
+     let* memory = Fields.field_opt m "memory" int in
+     let* stack = Fields.field_opt m "stack" dec_stack_limit in
+     let* nodes = Fields.field_opt m "nodes" int in
+     let* ntasks = Fields.field_opt m "ntasks" int in
+     let* cpus_per_task = Fields.field_opt m "cpus_per_task" int in
+     let+ () = Fields.check_no_field_left m in
+     let memory = Some (CCOpt.get_or ~default:10_000_000 memory) in
+     A_run_provers_slurm {dirs;provers;timeout;memory;stack;pattern;nodes;ntasks;cpus_per_task;j;db_file;loc}
     );
     (is_applied "progn",
      let+ l = applied "progn" self in
