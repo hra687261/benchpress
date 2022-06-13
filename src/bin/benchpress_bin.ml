@@ -71,7 +71,7 @@ module Run = struct
 end
 
 module Slurm = struct
-
+  (* sub-command for running tests with slurm *)
   let cmd =
     let open Cmdliner in
     let aux j paths dir_file proof_dir

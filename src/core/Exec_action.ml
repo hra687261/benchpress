@@ -142,10 +142,7 @@ end = struct
       | Some l -> Limit.All.with_defaults l ~defaults:s_limits
     in
     let j = j >?? s_j >? Misc.guess_cpu_count () in
-    let pbfl =
-      match pb_file with
-      | Some pbf -> Problem.pb_list_of_file pbf
-      | None -> [] in
+    let pbfl = CCOpt.map_or ~default:[] Problem.pb_list_of_file pb_file in
     let problems =
       pbfl @
       CCList.flat_map
@@ -178,18 +175,15 @@ end = struct
     | _ -> f ()
 
   let get_db_file ?db_file timestamp uuid =
-    match db_file with
-    | Some f ->
-      Misc.Shell.empty_file f; f
-    | None ->
-      db_file_for_uuid ~timestamp uuid
+    CCOpt.map_or
+      ~default:(db_file_for_uuid ~timestamp uuid)
+      (fun f -> Misc.Shell.empty_file f; f)
+      db_file
 
   let prepare_db ?db_file timestamp uuid save provers =
     let db =
       if save then (
-        let db_file =
-          get_db_file ?db_file timestamp uuid
-        in
+        let db_file = get_db_file ?db_file timestamp uuid in
         Sqlite3.db_open ~mutex:`FULL db_file
       ) else
         Sqlite3.db_open ":memory:"
@@ -398,6 +392,15 @@ end = struct
     let cmds = List.rev (aux_f cmd_files) in
     Slurm_cmd.sbatch_script ~options:sbatch_options cmds
 
+  (** [join_db_tables dest_file dbfl] Merges the databases stored in the files
+      dbfl into a new database that will be stored in the file [dest_file].
+
+      Assumes:
+      - The tables "prover_res" and "proof_check_res" exist in all
+      the files and that their elements all have distinct indexes.
+      - All the other tables are the same in every file.
+      - The user has the right to write into [dest_file] and all the files in
+      [dbfl].*)
   let join_db_tables
       dest_file (dbfl: (string * string) list) =
     let mk_cmd fsrc fdest =
@@ -502,7 +505,7 @@ end = struct
     let db = Sqlite3.db_open res_db in
     let top_res = lazy ( Test_top_result.of_db db) in
     let r = Test_compact_result.of_db db in
-    (* check output files before removing them *)
+    (* delete the temporary files. *)
     rm_files script_path cmd_files;
     on_done r;
     Logs.debug (fun k->k "closing db…");

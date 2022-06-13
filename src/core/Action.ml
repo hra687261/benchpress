@@ -18,8 +18,7 @@ type run_provers = {
 
 type run_provers_slurm_submission = {
   nodes: int option;
-  (* the number of nodes that need to be allocated for the job.
-  *)
+  (* the number of nodes that need to be allocated for the job *)
   ntasks: int option;
   (* number of parallel processes to launch *)
   cpus_per_task: int option;
@@ -27,8 +26,7 @@ type run_provers_slurm_submission = {
      concurrent execution of benchpress.
      if [cpus_per_task] is provided and not [j], then the number of
      concurrent processes will be equal to the number of cpus per
-     task.
-  *)
+     task *)
   db_file: string option;
   (* the file in which to store the database *)
   j: int option;

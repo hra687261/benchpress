@@ -174,7 +174,7 @@ let rec pp_action out =
       (pp_opt "db_file" Fmt.string) db_file
       (pp_opt "j" Fmt.int) j
   | A_run_provers_slurm {dirs;provers;timeout;memory;stack;pattern;nodes;ntasks;cpus_per_task;j;db_file;loc=_} ->
-    Fmt.fprintf out "(@[<v>run_provers%a%a%a%a%a%a%a%a%a%a%a@])"
+    Fmt.fprintf out "(@[<v>run_provers_slurm%a%a%a%a%a%a%a%a%a%a%a@])"
       (pp_f "dirs" (pp_l pp_str)) dirs
       (pp_f "provers" (pp_l pp_str)) provers
       (pp_opt "pattern" pp_regex) pattern
