@@ -41,6 +41,15 @@ Most of the commands accept `-c <config file>` to specify which config files to 
   * `-F <file>` read list of problems from given file
   * `-p <prover1,prover2>` list of provers to use
   * `--task <profile>` specify which task to use
+- `benchpress slurm`:
+  * `-t <time>` timeout (in seconds) for each run
+  * `-m <memory>` memory limit in MB
+  * `-F <file>` read list of problems from given file
+  * `-p <prover1,prover2>` list of provers to use
+  * `--task <profile>` specify which task to use
+  * `--nodes`: number of nodes to allocate for the execution
+  * `--ntasks`: number of parallel instances of benchpress to run
+  * `--cpus-per-task`: number of cpus to use on each benchpress instance
 - `benchpress dir config` shows the configuration directory
 - `benchpress dir state` shows the directory where the state (benchmark results) is stored
 - `benchpress check-config <file>` to check that the file is valid configuration
@@ -209,7 +218,15 @@ same repository).
   * `(dirs (p1 … pn))` paths containing benchmarks. The paths must be subdirectories
     of already defined directories (see the `dir` stanza above)
   * `(timeout n)` (optional) defines a timeout in seconds
+  * `(memory n)` (optional) defines a memory limit in MB
   * `(pattern regex)` (optional) an additional regex for files to consider in `dirs`
+  * `(db_file n)` (optional) defines a file in which to store the database
+  * `(j n)` (optional) defines the number of concurrent threads to use when running the provers
+- `(run_provers_slurm fields)` to run some provers on some benchmarks using the computing power of a slurm cluster. The fields are mainly the same as those of the `run_provers` except that they apply to each the instances on benchpress that will be lunched on the cluster's nodes. There are also additional fields:
+  * `(nodes n)`: (optional) the number of nodes to allocate to the action (default is 1).
+  * `(ntasks n)`: (optional) the number of benchpress instances to lunch in parallel (default is the number of `nodes`).
+  * `(cpus_per_task n)`: (optional) the number of cpus to use on each parallel instance of benchpress (default is 1).
+  * `(j n)` (optional) defines the number of concurrent threads to use for each parallel instance of benchpress (default is the number of `cpus_per_task`).
 - `(progn a1 … an)` runs actions in sequence. Fails if any action fails.
 - `(run_cmd "the command")` runs the given command.
 - `(git_checkout (dir d) (ref r) [(fetch_first fetch|pull)])` specifies
