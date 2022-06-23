@@ -351,6 +351,8 @@ end = struct
     ignore ntasks;
     let sbatch_options =
       ("--wait", None) ::
+      ("-o", Some "slurm-%j.out") ::
+      ("-e", Some "slurm-%j.err") ::
       ( aux_int "--ntasks" ntasks @@
         aux_int "--nodes" nodes []
       )
@@ -386,10 +388,10 @@ end = struct
         let bp_cmd =
           Misc.Shell.mk_cmd Sys.executable_name ~options:bp_options
         in
-        (Slurm_cmd.srun bp_cmd ~options:srun_options, t = []) :: aux_f t
+        (Slurm_cmd.srun bp_cmd ~options:srun_options, true) :: aux_f t
       | [] -> []
     in
-    let cmds = List.rev (aux_f cmd_files) in
+    let cmds = List.rev (("wait", false) :: aux_f cmd_files) in
     Slurm_cmd.sbatch_script ~options:sbatch_options cmds
 
   (** [join_db_tables dest_file dbfl] Merges the databases stored in the files
