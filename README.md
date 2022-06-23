@@ -232,3 +232,20 @@ same repository).
 - `(git_checkout (dir d) (ref r) [(fetch_first fetch|pull)])` specifies
   a directory in which to go (`(dir d)`), a git reference to checkout (`(ref r)`)
   and optionally a tag to indicate whether to fetch/pull the repo first.
+
+## An example of a task running with slurm
+
+```
+(task
+  (name testrun-slurm)
+  (action
+    (run_provers_slurm
+      (dirs ($PATHS))
+      (provers (z3 cvc4))
+      (timeout 2)
+      (nodes 2)
+      (ntasks 2)
+      (cpus_per_task 1))))
+```
+
+assuming that $PATHS are paths to directories containing smt-lib2 benchmarks which were previously defined in the config file.
