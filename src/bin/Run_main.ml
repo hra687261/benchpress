@@ -45,12 +45,12 @@ let execute_submit_job_action
   let nodes = r.nodes in
   let ntasks = r.ntasks in
   let cpus_per_task = r.cpus_per_task in
-  let r =
+  let exp_r =
     Exec_action.Exec_run_provers.expand
       ?dyn ?j ?proof_dir ?limits defs
       ?db_file:r.db_file r.limits r.j r.pattern r.dirs r.provers
   in
-  let len = List.length r.problems in
+  let len = List.length exp_r.problems in
   Notify.sendf notify "testing with %d provers, %d problems…"
     (List.length r.provers) len;
   (* submit job *)
@@ -61,9 +61,10 @@ let execute_submit_job_action
       ~uuid ?timestamp
       ~interrupted:(fun () ->
           CCLock.get interrupted)
-      ?db_file:r.db_file ?config_file ?nodes ?ntasks ?cpus_per_task
+      ?db_file:exp_r.db_file ?config_file
+      ?partition:r.partition ?nodes ?ntasks ?cpus_per_task
       ~save
-      r
+      exp_r
   in
   result
 
@@ -74,7 +75,7 @@ type top_task =
 
 let main ?j ?pp_results ?dyn ?timeout ?memory ?csv ?(provers=[])
     ?meta:_ ?summary ?task ?dir_file ?proof_dir ?(save=true)
-    ?(sbatch = false) ?db_file ?pb_file ?nodes ?ntasks ?cpus_per_task
+    ?(sbatch = false) ?db_file ?pb_file ?partition ?nodes ?ntasks ?cpus_per_task
     (defs:Definitions.t) paths () : unit =
   Log.info
     (fun k->k"run-main.main for paths %a" (Misc.pp_list Misc.Pp.pp_str) paths);
@@ -97,7 +98,7 @@ let main ?j ?pp_results ?dyn ?timeout ?memory ?csv ?(provers=[])
           Error.guard (Error.wrap ~loc "running task 'run provers with slurm'") @@ fun () ->
           let rr: Action.run_provers_slurm_submission =
             Definitions.mk_run_provers_slurm_submission
-              ?nodes ?ntasks ?cpus_per_task ?j ~paths ?db_file
+              ?partition ?nodes ?ntasks ?cpus_per_task ?j ~paths ?db_file
               ?timeout ?memory ~provers ~loc:None defs
           in
           let paths = CCList.map (Definitions.mk_subdir defs) paths in
@@ -170,8 +171,8 @@ let main ?j ?pp_results ?dyn ?timeout ?memory ?csv ?(provers=[])
     | None ->
       let provers =
         match provers with
-       | [] -> Error.fail "please provide at least one prover"
-       | l -> l
+        | [] -> Error.fail "please provide at least one prover"
+        | l -> l
       in
       let provers = CCList.sort_uniq ~cmp:Prover.compare_name provers in (* deduplicate *)
       let r =

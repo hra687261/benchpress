@@ -76,16 +76,18 @@ module Slurm = struct
     let open Cmdliner in
     let aux j paths dir_file proof_dir
         defs task timeout memory provers csv summary no_color
-        db_file nodes ntasks cpus_per_task =
+        db_file partition nodes ntasks cpus_per_task =
       catch_err @@ fun () ->
       if no_color then CCFormat.set_color_default false;
       Run_main.main  ~sbatch:true ~j ?timeout ?memory ?csv ~provers
         ?summary ?task ?dir_file ?proof_dir
         ~save:true (* this mode always saves the resulting db on disk *)
-        ?db_file ?nodes ?ntasks ?cpus_per_task
+        ?db_file ?partition ?nodes ?ntasks ?cpus_per_task
         defs paths ()
     in
     let defs = Bin_utils.definitions_term
+    and doc =
+      "run benchpress using the computing power of a cluster using slurm"
     and dir_file =
       Arg.(value & opt (some string) None & info ["F"] ~doc:"file containing a list of files")
     and db_file =
@@ -100,8 +102,6 @@ module Slurm = struct
       Arg.(value & opt int 1 & info ["j"] ~doc:"number of threads each parallel execution of benchpress can launch")
     and memory =
       Arg.(value & opt (some int) None & info ["m"; "memory"] ~doc:"memory (in MB)")
-    and doc =
-      "run benchpress using the computing power of a cluster using slurm"
     and csv =
       Arg.(value & opt (some string) None & info ["csv"] ~doc:"CSV output file")
     and paths =
@@ -113,6 +113,9 @@ module Slurm = struct
       Arg.(value & flag & info ["no-color"; "nc"] ~doc:"disable colored output")
     and summary =
       Arg.(value & opt (some string) None & info ["summary"] ~doc:"write summary in FILE")
+    and partition =
+      Arg.(value & opt (some string) None & info ["partition"]
+             ~doc:"partition to which the allocated nodes should belong")
     and nodes =
       Arg.(value & opt (some int) None & info ["nodes"] ~doc:"number of nodes to be used")
     and ntasks =
@@ -123,7 +126,7 @@ module Slurm = struct
     Cmd.v (Cmd.info ~doc "slurm")
       (Term.(const aux $ j $ paths $ dir_file $ proof_dir $ defs $ task
              $ timeout $ memory $ provers $ csv $ summary $ no_color
-             $ db_file $ nodes $ ntasks $ cpus_per_task))
+             $ db_file $ partition $ nodes $ ntasks $ cpus_per_task))
 end
 
 module List_files = struct

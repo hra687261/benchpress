@@ -59,6 +59,7 @@ module Exec_run_provers : sig
     ?on_done:(Test_compact_result.t -> unit) ->
     ?interrupted:(unit -> bool) ->
     ?config_file:string ->
+    ?partition:string ->
     ?nodes:int ->
     ?ntasks:int ->
     ?cpus_per_task:int ->

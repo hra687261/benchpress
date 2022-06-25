@@ -17,6 +17,8 @@ type run_provers = {
 }
 
 type run_provers_slurm_submission = {
+  partition: string option;
+  (* The partition to which the allocated nodes should belong. *)
   nodes: int option;
   (* the number of nodes that need to be allocated for the job *)
   ntasks: int option;
@@ -74,11 +76,12 @@ let pp_run_provers out (self:run_provers) =
 let pp_run_provers_slurm out (self:run_provers_slurm_submission) =
   let open Misc.Pp in
   let {
-    nodes; ntasks; cpus_per_task; db_file;
+    partition; nodes; ntasks; cpus_per_task; db_file;
     j; dirs; provers; pattern; limits; _
   } = self
   in
-  Fmt.fprintf out "(@[<v1>run_provers.Slurm%a%a%a%a%a%a%a%a%a%a%a@])"
+  Fmt.fprintf out "(@[<v1>run_provers.Slurm%a%a%a%a%a%a%a%a%a%a%a%a@])"
+    (pp_opt "partition" Fmt.string) partition
     (pp_opt "nodes" Fmt.int) nodes
     (pp_opt "ntasks" Fmt.int) ntasks
     (pp_opt "cpus_per_task" Fmt.int) cpus_per_task

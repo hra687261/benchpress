@@ -68,6 +68,7 @@ module Exec_run_provers : sig
     ?on_done:(Test_compact_result.t -> unit) ->
     ?interrupted:(unit -> bool) ->
     ?config_file:string ->
+    ?partition:string ->
     ?nodes:int ->
     ?ntasks:int ->
     ?cpus_per_task:int ->
@@ -336,7 +337,8 @@ end = struct
     ignore (Sqlite3.db_close db : bool);
     top_res, r
 
-  let mk_sbatch_script ?config_file ?nodes ?ntasks ?cpus_per_task ?j ?(provers: Prover.t list = [])
+  let mk_sbatch_script ?config_file ?partition ?nodes ?ntasks ?cpus_per_task
+      ?j ?(provers: Prover.t list = [])
       (cmd_files: (string * string) list) =
     let aux name opt acc =
       CCOption.map_or ~default:acc
@@ -353,7 +355,8 @@ end = struct
       ("--wait", None) ::
       ("-o", Some "slurm-%j.out") ::
       ("-e", Some "slurm-%j.err") ::
-      ( aux_int "--ntasks" ntasks @@
+      ( aux "--partition" partition @@
+        aux_int "--ntasks" ntasks @@
         aux_int "--nodes" nodes []
       )
     in
@@ -450,7 +453,7 @@ end = struct
       ?(on_proof_check = _nop)
       ?(on_done = _nop)
       ?(interrupted=fun _->false)
-      ?config_file ?nodes ?ntasks ?cpus_per_task ?db_file
+      ?config_file ?partition ?nodes ?ntasks ?cpus_per_task ?db_file
       ~uuid ~save (self:expanded) : _*_ =
     ignore (save, interrupted, on_start, on_solve, on_start_proof_check, on_proof_check);
 
@@ -484,7 +487,7 @@ end = struct
     in
     let cmd_files = List.rev rev_cmd_files in
     let sbatch_script =
-      mk_sbatch_script ?config_file ?nodes ?ntasks ?cpus_per_task
+      mk_sbatch_script ?config_file ?partition ?nodes ?ntasks ?cpus_per_task
         ~j:self.j ~provers:self.provers cmd_files
     in
     let script_path = aux_mk_uniq_filename "/script-" ".sh" in
