@@ -48,8 +48,6 @@ Most of the commands accept `-c <config file>` to specify which config files to 
   * `-p <prover1,prover2>` list of provers to use
   * `--task <profile>` specify which task to use
   * `--nodes`: number of nodes to allocate for the execution
-  * `--ntasks`: number of parallel instances of benchpress to run
-  * `--cpus-per-task`: number of cpus to use on each benchpress instance
 - `benchpress dir config` shows the configuration directory
 - `benchpress dir state` shows the directory where the state (benchmark results) is stored
 - `benchpress check-config <file>` to check that the file is valid configuration
@@ -224,9 +222,7 @@ same repository).
   * `(j n)` (optional) defines the number of concurrent threads to use when running the provers
 - `(run_provers_slurm fields)` to run some provers on some benchmarks using the computing power of a slurm cluster. The fields are mainly the same as those of the `run_provers` except that they apply to each the instances on benchpress that will be lunched on the cluster's nodes. There are also additional fields:
   * `(nodes n)`: (optional) the number of nodes to allocate to the action (default is 1).
-  * `(ntasks n)`: (optional) the number of benchpress instances to lunch in parallel (default is the number of `nodes`).
-  * `(cpus_per_task n)`: (optional) the number of cpus to use on each parallel instance of benchpress (default is 1).
-  * `(j n)` (optional) defines the number of concurrent threads to use for each parallel instance of benchpress (default is the number of `cpus_per_task`).
+  * `(j n)` (optional) defines the number of concurrent threads to use for each parallel instance of benchpress (default is 4).
 - `(progn a1 … an)` runs actions in sequence. Fails if any action fails.
 - `(run_cmd "the command")` runs the given command.
 - `(git_checkout (dir d) (ref r) [(fetch_first fetch|pull)])` specifies
@@ -243,9 +239,7 @@ same repository).
       (dirs ($PATHS))
       (provers (z3 cvc4))
       (timeout 2)
-      (nodes 2)
-      (ntasks 2)
-      (cpus_per_task 1))))
+      (nodes 2))))
 ```
 
 assuming that $PATHS are paths to directories containing smt-lib2 benchmarks which were previously defined in the config file.

@@ -70,8 +70,6 @@ module Exec_run_provers : sig
     ?config_file:string ->
     ?partition:string ->
     ?nodes:int ->
-    ?ntasks:int ->
-    ?cpus_per_task:int ->
     ?db_file:string ->
     uuid:Uuidm.t ->
     save:bool ->
@@ -337,7 +335,7 @@ end = struct
     ignore (Sqlite3.db_close db : bool);
     top_res, r
 
-  let mk_sbatch_script ?config_file ?partition ?nodes ?ntasks ?cpus_per_task
+  let mk_sbatch_script ?config_file ?partition ?nodes
       ?j ?(provers: Prover.t list = [])
       (cmd_files: (string * string) list) =
     let aux name opt acc =
@@ -350,25 +348,25 @@ end = struct
         (fun v -> (name, Some (Int.to_string v))::acc)
         opt
     in
-    ignore ntasks;
     let sbatch_options =
       ("--wait", None) ::
       ("-o", Some "slurm-%j.out") ::
       ("-e", Some "slurm-%j.err") ::
       ( aux "--partition" partition @@
-        aux_int "--ntasks" ntasks @@
+        aux_int "--ntasks" nodes @@
         aux_int "--nodes" nodes []
       )
     in
     let srun_options =
       aux_int "--ntasks" (Some 1) @@
-      aux_int "--nodes" (Some 1) @@
-      CCOption.map_or ~default:[] (
-        fun v ->
+      aux_int "--nodes" (Some 1) []
+      (* @@
+         CCOption.map_or ~default:[] (
+         fun v ->
           if v > 1
           then aux_int "--cpus-per-task" (Some v) []
           else []
-      ) cpus_per_task
+         ) cpus_per_task *)
     in
     let provers_opt =
       List.map (fun Prover.{ name; _ } -> "-p", Some name) provers
@@ -453,12 +451,12 @@ end = struct
       ?(on_proof_check = _nop)
       ?(on_done = _nop)
       ?(interrupted=fun _->false)
-      ?config_file ?partition ?nodes ?ntasks ?cpus_per_task ?db_file
-      ~uuid ~save (self:expanded) : _*_ =
+      ?config_file ?partition ?nodes ?db_file ~uuid ~save
+      (self:expanded) : _*_ =
     ignore (save, interrupted, on_start, on_solve, on_start_proof_check, on_proof_check);
 
     let pbll =
-      Misc.split_list self.problems (CCOpt.get_or ~default:1 ntasks)
+      Misc.split_list self.problems (CCOpt.get_or ~default:1 nodes)
     in
     let data_dir = Filename.concat (Xdg.data_dir ()) !(Xdg.name_of_project) in
     (try Unix.mkdir data_dir 0o744 with _ -> ());
@@ -487,7 +485,7 @@ end = struct
     in
     let cmd_files = List.rev rev_cmd_files in
     let sbatch_script =
-      mk_sbatch_script ?config_file ?partition ?nodes ?ntasks ?cpus_per_task
+      mk_sbatch_script ?config_file ?partition ?nodes
         ~j:self.j ~provers:self.provers cmd_files
     in
     let script_path = aux_mk_uniq_filename "/script-" ".sh" in
@@ -723,8 +721,7 @@ let rec run ?(save=true) ?interrupted ?cb_progress
       Format.printf "task done: %a@." Test_compact_result.pp res;
       ()
     | Act_run_slurm_submission {
-        nodes; ntasks; cpus_per_task; db_file;
-        j; dirs; provers; pattern; limits; _
+        nodes; db_file; j; dirs; provers; pattern; limits; _
       } ->
       let is_dyn = CCOpt.get_or ~default:false @@ Definitions.option_progress defs in
       let r_expanded =
@@ -748,8 +745,6 @@ let rec run ?(save=true) ?interrupted ?cb_progress
           ~save
           ?config_file
           ?nodes
-          ?ntasks
-          ?cpus_per_task
           ?db_file
           r_expanded
       in

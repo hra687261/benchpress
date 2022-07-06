@@ -47,8 +47,6 @@ type action =
   | A_run_provers_slurm of {
       partition: string option;
       nodes: int option;
-      ntasks: int option;
-      cpus_per_task: int option;
       db_file: string option;
       j: int option;
       dirs: string list; (* list of directories to examine *)
@@ -176,9 +174,9 @@ let rec pp_action out =
       (pp_opt "j" Fmt.int) j
   | A_run_provers_slurm {
       dirs;provers;timeout;memory;stack;pattern;
-      partition;nodes;ntasks;cpus_per_task;j;db_file;loc=_
+      partition;nodes;j;db_file;loc=_
     } ->
-    Fmt.fprintf out "(@[<v>run_provers_slurm%a%a%a%a%a%a%a%a%a%a%a%a@])"
+    Fmt.fprintf out "(@[<v>run_provers_slurm%a%a%a%a%a%a%a%a%a%a@])"
       (pp_f "dirs" (pp_l pp_str)) dirs
       (pp_f "provers" (pp_l pp_str)) provers
       (pp_opt "pattern" pp_regex) pattern
@@ -187,8 +185,6 @@ let rec pp_action out =
       (pp_opt "stack" pp_stack_limit) stack
       (pp_opt "partition" Fmt.string) partition
       (pp_opt "nodes" Fmt.int) nodes
-      (pp_opt "ntasks" Fmt.int) ntasks
-      (pp_opt "cpus_per_task" Fmt.int) cpus_per_task
       (pp_opt "db_file" Fmt.string) db_file
       (pp_opt "j" Fmt.int) j
   | A_progn l -> Fmt.fprintf out "(@[progn %a@])" (pp_l pp_action) l
@@ -377,13 +373,11 @@ let dec_action : action SD.t =
      let* stack = Fields.field_opt m "stack" dec_stack_limit in
      let* partition = Fields.field_opt m "partition" string in
      let* nodes = Fields.field_opt m "nodes" int in
-     let* ntasks = Fields.field_opt m "ntasks" int in
-     let* cpus_per_task = Fields.field_opt m "cpus_per_task" int in
      let+ () = Fields.check_no_field_left m in
      let memory = Some (CCOpt.get_or ~default:10_000_000 memory) in
      A_run_provers_slurm {
       dirs;provers;timeout;memory;stack;pattern;
-      partition;nodes;ntasks;cpus_per_task;j;db_file;loc}
+      partition;nodes;j;db_file;loc}
     );
     (is_applied "progn",
      let+ l = applied "progn" self in

@@ -76,14 +76,13 @@ module Slurm = struct
     let open Cmdliner in
     let aux j paths dir_file proof_dir
         defs task timeout memory provers csv summary no_color
-        db_file partition nodes ntasks cpus_per_task =
+        db_file partition nodes =
       catch_err @@ fun () ->
       if no_color then CCFormat.set_color_default false;
       Run_main.main  ~sbatch:true ~j ?timeout ?memory ?csv ~provers
         ?summary ?task ?dir_file ?proof_dir
         ~save:true (* this mode always saves the resulting db on disk *)
-        ?db_file ?partition ?nodes ?ntasks ?cpus_per_task
-        defs paths ()
+        ?db_file ?partition ?nodes defs paths ()
     in
     let defs = Bin_utils.definitions_term
     and doc =
@@ -118,15 +117,11 @@ module Slurm = struct
              ~doc:"partition to which the allocated nodes should belong")
     and nodes =
       Arg.(value & opt (some int) None & info ["nodes"] ~doc:"number of nodes to be used")
-    and ntasks =
-      Arg.(value & opt (some int) None & info ["ntasks"] ~doc:"number of parallel jobs to launch")
-    and cpus_per_task =
-      Arg.(value & opt (some int) None & info ["cpus-per-task"] ~doc:"number of cpus to assing to each benchpress task")
     in
     Cmd.v (Cmd.info ~doc "slurm")
       (Term.(const aux $ j $ paths $ dir_file $ proof_dir $ defs $ task
              $ timeout $ memory $ provers $ csv $ summary $ no_color
-             $ db_file $ partition $ nodes $ ntasks $ cpus_per_task))
+             $ db_file $ partition $ nodes))
 end
 
 module List_files = struct

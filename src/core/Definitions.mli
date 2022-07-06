@@ -69,8 +69,6 @@ val mk_run_provers :
 val mk_run_provers_slurm_submission:
   ?partition:string ->
   ?nodes:int ->
-  ?ntasks:int ->
-  ?cpus_per_task:int ->
   ?db_file:string ->
   ?j:int ->
   paths:path list ->

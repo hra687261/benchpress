@@ -20,15 +20,8 @@ type run_provers_slurm_submission = {
   partition: string option;
   (* The partition to which the allocated nodes should belong. *)
   nodes: int option;
-  (* the number of nodes that need to be allocated for the job *)
-  ntasks: int option;
-  (* number of parallel processes to launch *)
-  cpus_per_task: int option;
-  (* The number of CPUs in a node that will be allocated to the
-     concurrent execution of benchpress.
-     if [cpus_per_task] is provided and not [j], then the number of
-     concurrent processes will be equal to the number of cpus per
-     task *)
+  (* the number of nodes that need to be allocated for the job.
+     One instance of benchpress will run on each node. *)
   db_file: string option;
   (* the file in which to store the database *)
   j: int option;
@@ -76,15 +69,13 @@ let pp_run_provers out (self:run_provers) =
 let pp_run_provers_slurm out (self:run_provers_slurm_submission) =
   let open Misc.Pp in
   let {
-    partition; nodes; ntasks; cpus_per_task; db_file;
+    partition; nodes; db_file;
     j; dirs; provers; pattern; limits; _
   } = self
   in
-  Fmt.fprintf out "(@[<v1>run_provers.Slurm%a%a%a%a%a%a%a%a%a%a%a%a@])"
+  Fmt.fprintf out "(@[<v1>run_provers.Slurm%a%a%a%a%a%a%a%a%a%a@])"
     (pp_opt "partition" Fmt.string) partition
     (pp_opt "nodes" Fmt.int) nodes
-    (pp_opt "ntasks" Fmt.int) ntasks
-    (pp_opt "cpus_per_task" Fmt.int) cpus_per_task
     (pp_opt "db_file" Fmt.string) db_file
     (pp_opt "j" Fmt.int) j
     (pp_f "dirs" (pp_l Subdir.pp)) dirs

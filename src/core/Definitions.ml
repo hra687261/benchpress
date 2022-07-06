@@ -90,7 +90,7 @@ let get_version ?(binary="") (v:Stanza.version_field) : Prover.version =
     | Stanza.Version_cmd {cmd} ->
       begin try
           Tag (Misc.get_cmd_out @@ Prover.interpolate_cmd cmd
-                 ~subst:(Prover.subst ~binary ()))
+              ~subst:(Prover.subst ~binary ()))
         with Prover.Subst_not_found s ->
           Tag (Printf.sprintf "command `%s` failed: cannot find field %s" cmd s)
       end
@@ -167,8 +167,8 @@ let mk_limits ?timeout ?memory ?stack () =
   let memory = CCOpt.map (fun m -> Limit.Memory.mk ~m ()) memory in
   (* Stack sizes are also given in Megabytes *)
   let stack = CCOpt.map (function
-      | Stanza.Unlimited -> Limit.Stack.Unlimited
-      | Stanza.Limited m -> Limit.Stack.Limited (Limit.Memory.mk ~m ())
+    | Stanza.Unlimited -> Limit.Stack.Unlimited
+    | Stanza.Limited m -> Limit.Stack.Limited (Limit.Memory.mk ~m ())
     ) stack in
   Limit.All.mk ?time ?memory ?stack ()
 
@@ -181,7 +181,7 @@ let mk_run_provers ?j ?timeout ?memory ?stack
   Action.{ db_file; pb_file; j; limits; dirs; provers; pattern; loc }
 
 let mk_run_provers_slurm_submission
-    ?partition ?nodes ?ntasks ?cpus_per_task ?db_file
+    ?partition ?nodes ?db_file
     ?j ~paths ?timeout ?memory ?stack ?pattern ~provers ~loc
     (self:t) : Action.run_provers_slurm_submission =
   let map_stricly_positive_opt =
@@ -191,9 +191,7 @@ let mk_run_provers_slurm_submission
   let dirs = CCList.map (mk_subdir self) paths in
   let limits = mk_limits ?timeout ?memory ?stack () in
   let nodes = map_stricly_positive_opt nodes in
-  let ntasks = map_stricly_positive_opt ntasks in
-  let cpus_per_task = map_stricly_positive_opt cpus_per_task in
-  { partition; nodes; ntasks; cpus_per_task; db_file; j;
+  { partition; nodes; db_file; j;
     provers; dirs; pattern; limits; loc;
   }
 
@@ -210,12 +208,12 @@ let rec mk_action (self:t) (a:Stanza.action) : _ =
     Action.Act_run_provers a
   | Stanza.A_run_provers_slurm {
       provers; memory; dirs; timeout; stack; pattern;
-      partition; nodes; ntasks; cpus_per_task; j; db_file; loc;
+      partition; nodes; j; db_file; loc;
     } ->
     let a =
       mk_run_provers_slurm_submission ?j
         ?timeout ?memory ?stack ?pattern ~loc:(Some loc) ?partition ?nodes
-        ?ntasks ?cpus_per_task ?db_file ~paths:dirs ~provers self
+        ?db_file ~paths:dirs ~provers self
     in
     Action.Act_run_slurm_submission a
   | Stanza.A_progn l ->

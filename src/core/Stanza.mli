@@ -42,8 +42,6 @@ type action =
   | A_run_provers_slurm of {
       partition: string option;
       nodes: int option;
-      ntasks: int option;
-      cpus_per_task: int option;
       db_file: string option;
       j: int option;
       dirs: string list; (* list of directories to examine *)

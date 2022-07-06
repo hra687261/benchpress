@@ -61,8 +61,6 @@ module Exec_run_provers : sig
     ?config_file:string ->
     ?partition:string ->
     ?nodes:int ->
-    ?ntasks:int ->
-    ?cpus_per_task:int ->
     ?db_file:string ->
     uuid:Uuidm.t ->
     save:bool ->
