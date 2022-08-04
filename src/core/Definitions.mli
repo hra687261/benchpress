@@ -51,6 +51,7 @@ val mk_run_provers :
   ?j:int ->
   ?timeout:int ->
   ?memory:int ->
+  ?steps:bool ->
   ?stack:Stanza.stack_limit ->
   ?pattern:string ->
   paths:path list ->

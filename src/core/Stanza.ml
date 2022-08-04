@@ -72,6 +72,7 @@ type t =
       unsat   : regex option;  (** regex for "unsat" *)
       sat     : regex option;  (** regex for "sat" *)
       unknown : regex option;  (** regex for "unknown" *)
+      steps   : regex option;  (** regex for then number of "steps" *)
       timeout : regex option;  (** regex for "timeout" *)
       memory  : regex option;  (** regex for "out of memory" *)
       custom  : (string * regex) list; (** regex for custom results *)
@@ -171,13 +172,13 @@ let pp out =
       (pp_opt "expect" pp_expect) expect
       (pp_opt "pattern" pp_regex) pattern
   | St_prover {
-      name; cmd; version; unsat; sat; unknown; timeout; memory;
+      name; cmd; version; unsat; sat; unknown; steps; timeout; memory;
       custom; ulimits;
       produces_proof; proof_ext; proof_checker; inherits; loc=_;
     } ->
     let pp_custom out (x,y) =
       Fmt.fprintf out "(@[tag %a@ %a@])" pp_str x pp_regex y in
-    Fmt.fprintf out "(@[<v>prover%a%a%a%a%a%a%a%a%a%a%a%a%a%a@])"
+    Fmt.fprintf out "(@[<v>prover%a%a%a%a%a%a%a%a%a%a%a%a%a%a%a@])"
       (pp_f "name" pp_str) name
       (pp_opt "cmd" pp_str) cmd
       (pp_opt "version" pp_version_field) version
@@ -185,6 +186,7 @@ let pp out =
       (pp_opt "sat" pp_regex) sat
       (pp_opt "unsat" pp_regex) unsat
       (pp_opt "unknown" pp_regex) unknown
+      (pp_opt "steps" pp_regex) steps
       (pp_opt "timeout" pp_regex) timeout
       (pp_opt "memory" pp_regex) memory
       (pp_opt "inherits" pp_str) inherits
@@ -379,6 +381,7 @@ let dec (st:state) : t list SD.t =
      let* sat = Fields.field_opt m "sat" dec_regex in
      let* unsat = Fields.field_opt m "unsat" dec_regex in
      let* unknown = Fields.field_opt m "unknown" dec_regex in
+     let* steps = Fields.field_opt m "steps" dec_regex in
      let* timeout = Fields.field_opt m "timeout" dec_regex in
      let* memory = Fields.field_opt m "memory" dec_regex in
      let* ulimits = Fields.field_opt m "ulimit" dec_ulimits in
@@ -393,8 +396,9 @@ let dec (st:state) : t list SD.t =
      in
 
      let st = St_prover {
-         name; cmd; version; sat; unsat; unknown; timeout; memory; custom;
-         ulimits; loc; produces_proof; proof_ext; inherits; proof_checker;
+         name; cmd; version; sat; unsat; unknown; steps; timeout; memory;
+         custom; ulimits; loc; produces_proof; proof_ext; inherits;
+         proof_checker;
        } in
 
      return [st]

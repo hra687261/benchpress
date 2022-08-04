@@ -18,11 +18,11 @@ module Run = struct
   let cmd =
     let open Cmdliner in
     let aux j pp_results dyn paths dir_file proof_dir defs task timeout memory
-        meta provers csv summary no_color save =
+        steps meta provers csv summary no_color save =
       catch_err @@ fun () ->
       if no_color then CCFormat.set_color_default false;
       let dyn = if dyn then Some true else None in
-      Run_main.main ~pp_results ?dyn ~j ?timeout ?memory ?csv ~provers
+      Run_main.main ~pp_results ?dyn ~j ?timeout ?memory ~steps ?csv ~provers
         ~meta ?task ?summary ?dir_file ?proof_dir ~save defs paths ()
     in
     let defs = Bin_utils.definitions_term
@@ -44,6 +44,8 @@ module Run = struct
       Arg.(value & opt int 1 & info ["j"] ~doc:"level of parallelism")
     and memory =
       Arg.(value & opt (some int) None & info ["m"; "memory"] ~doc:"memory (in MB)")
+    and steps =
+      Arg.(value & opt bool false & info ["s"; "steps"] ~doc:"Keep the number of steps it took the prover to respond.")
     and meta =
       Arg.(value & opt string "" & info ["meta"] ~doc:"additional metadata to save")
     and doc =
@@ -62,7 +64,7 @@ module Run = struct
     in
     Cmd.v (Cmd.info ~doc "run")
       (Term.(const aux $ j $ pp_results $ dyn $ paths
-             $ dir_file $ proof_dir $ defs $ task $ timeout $ memory
+             $ dir_file $ proof_dir $ defs $ task $ timeout $ memory $ steps
              $ meta $ provers $ csv $ summary $ no_color $ save))
 end
 

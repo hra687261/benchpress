@@ -225,7 +225,7 @@ end = struct
       CCLock.with_lock db (fun db -> Run_event.to_db db ev_prover);
 
       let ev_proof =
-        match result.res, proof_file with
+        match result.res.res, proof_file with
         | Res.Unsat, Some pfile when prover.Prover.produces_proof ->
           (* run proof checker *)
           Log.debug (fun k->k"proof-file size: %d"

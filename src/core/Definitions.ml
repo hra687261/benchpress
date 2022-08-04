@@ -172,12 +172,12 @@ let mk_limits ?timeout ?memory ?stack () =
 
 
 let mk_run_provers
-    ?j ?timeout ?memory ?stack ?pattern ~paths ~provers ~loc
+    ?j ?timeout ?memory ?(steps = false) ?stack ?pattern ~paths ~provers ~loc
     (self:t) : _ =
   let provers = CCList.map (find_prover' self) provers in
   let dirs = CCList.map (mk_subdir self) paths in
   let limits = mk_limits ?timeout ?memory ?stack () in
-  let act = { Action.j; limits; dirs; provers; pattern; loc } in
+  let act = { Action.j; limits; dirs; provers; pattern; steps; loc } in
   act
 
 let rec mk_action (self:t) (a:Stanza.action) : _ =
@@ -233,7 +233,7 @@ let add_stanza_ (st:Stanza.t) self : t =
     add_dir d self
 
   | St_prover {
-      name; cmd; sat; unsat; timeout; unknown; memory;
+      name; cmd; sat; unsat; unknown; steps; timeout; memory;
       version; custom; ulimits; loc;
       produces_proof; proof_ext; proof_checker; inherits;
     } ->
@@ -258,6 +258,8 @@ let add_stanza_ (st:Stanza.t) self : t =
       | None, Some p -> p.unsat | r, _ -> r
     and unknown = match unknown, inherits_p with
       | None, Some p -> p.unknown | r, _ -> r
+    and steps = match steps, inherits_p with
+      | None, Some p -> p.steps | r, _ -> r
     and timeout = match timeout , inherits_p with
       | None, Some p -> p.timeout | r, _ -> r
     and memory = match memory , inherits_p with
@@ -304,7 +306,7 @@ let add_stanza_ (st:Stanza.t) self : t =
     in
     let p = {
       Prover.
-      name; cmd; sat; unsat; timeout; unknown; memory; ulimits;
+      name; cmd; sat; unsat; unknown; steps; timeout; memory; ulimits;
       binary; binary_deps=[]; version=get_version ~binary version;
       custom; defined_in=self.config_file;
       inherits; produces_proof; proof_ext; proof_checker;

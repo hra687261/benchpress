@@ -2,7 +2,7 @@
 
 module Fmt = CCFormat
 
-type t =
+type res =
   | Sat
   | Unsat
   | Unknown
@@ -10,7 +10,15 @@ type t =
   | Error
   | Tag of string
 
-let to_string = function
+type t = {
+  res: res;
+  steps: int option;
+}
+
+let mk ?steps res = { res; steps; }
+
+let to_string { res; _ } =
+  match res with
   | Sat -> "sat"
   | Unsat -> "unsat"
   | Unknown -> "unknown"
@@ -18,18 +26,23 @@ let to_string = function
   | Error -> "error"
   | Tag s -> s
 
-let of_string ~tags = function
-  | "sat" -> Sat
-  | "unsat" -> Unsat
-  | "error" -> Error
-  | "timeout" -> Timeout
-  | "unknown" -> Unknown
-  | s when List.mem s tags -> Tag s
-  | s -> failwith ("unknown result: " ^ s)
+let of_string ?steps ~tags s =
+  { res =
+      begin match s with
+        | "sat" -> Sat
+        | "unsat" -> Unsat
+        | "error" -> Error
+        | "timeout" -> Timeout
+        | "unknown" -> Unknown
+        | s when List.mem s tags -> Tag s
+        | s -> failwith ("unknown result: " ^ s)
+      end;
+    steps;
+  }
 
 let pp out s = Fmt.string out (to_string s)
 
-let compare a b = match a, b with
+let compare a b = match a.res, b.res with
   | Unsat, Unsat
   | Sat, Sat
   | (Unknown | Timeout), (Unknown | Timeout)

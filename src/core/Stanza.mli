@@ -72,6 +72,7 @@ type t =
       unsat   : regex option;  (** regex for "unsat" *)
       sat     : regex option;  (** regex for "sat" *)
       unknown : regex option;  (** regex for "unknown" *)
+      steps   : string option; (** regex for then number of "steps" *)
       timeout : regex option;  (** regex for "timeout" *)
       memory  : regex option;  (** regex for "out of memory" *)
       custom  : (string * regex) list; (** regex for custom results *)

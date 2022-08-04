@@ -160,7 +160,7 @@ let to_printbox ?link:(mk_link=default_pp_linker)
   let open PB in
   Logs.debug (fun k->k "coucou");
   let pp_res r =
-    match r with
+    match r.Res.res with
     | Res.Sat | Res.Unsat -> text_with_style Style.(set_fg_color Green@@bold) @@ Res.to_string r
     | Res.Error -> text_with_style Style.(set_fg_color Red@@bold) @@ Res.to_string r
     | _ -> text @@ Res.to_string r

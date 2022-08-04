@@ -34,7 +34,7 @@ type top_task =
   | TT_run_provers of Action.run_provers * Definitions.t
   | TT_other of Action.t
 
-let main ?j ?pp_results ?dyn ?timeout ?memory ?csv ?(provers=[])
+let main ?j ?pp_results ?dyn ?timeout ?memory ?(steps=false) ?csv ?(provers=[])
     ?meta:_ ?summary ?task ?dir_file ?proof_dir ?(save=true)
     (defs:Definitions.t) paths () : unit =
   Log.info
@@ -63,7 +63,7 @@ let main ?j ?pp_results ?dyn ?timeout ?memory ?csv ?(provers=[])
             provers @ r.provers
             |> CCList.sort_uniq ~cmp:Prover.compare_by_name
           in
-          let r = {r with provers; dirs=paths @ r.dirs} in
+          let r = {r with provers; dirs=paths @ r.dirs; steps; } in
           TT_run_provers (r,defs)
 
         | {loc=_;view=t} ->
@@ -77,7 +77,9 @@ let main ?j ?pp_results ?dyn ?timeout ?memory ?csv ?(provers=[])
       in
       let provers = CCList.sort_uniq ~cmp:Prover.compare_name provers in (* deduplicate *)
       let r =
-        Definitions.mk_run_provers ~loc:None ?timeout ?memory ?j ~provers ~paths defs in
+        Definitions.mk_run_provers
+          ~loc:None ?timeout ?memory ~steps ?j ~provers ~paths defs
+      in
       TT_run_provers (r, defs)
   in
   begin match tt_task with

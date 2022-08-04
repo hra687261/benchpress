@@ -39,6 +39,7 @@ type t = {
   unsat   : string option;  (* regex for "unsat" *)
   sat     : string option;  (* regex for "sat" *)
   unknown : string option;  (* regex for "unknown" *)
+  steps   : string option;  (* regex for then number of "steps" *)
   timeout : string option;  (* regex for "timeout" *)
   memory  : string option;  (* regex for "out of memory" *)
   custom  : (string * string) list; (* custom tags *)

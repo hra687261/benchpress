@@ -17,22 +17,36 @@ let map ~f e = { e with program = f e.program }
 let float_timeout t = Limit.Time.as_float Seconds t
 
 let analyze_self_ (self:(Prover.t, Res.t) t) =
+  let steps =
+    match self.program.steps with
+    | None -> None
+    | Some re ->
+      let rr = Re.Perl.compile (Re.Perl.re re) in
+      match Re.Group.all (Re.exec rr self.raw.stdout) with
+      | [|_; s|] -> int_of_string_opt s
+      | _ -> None
+      | exception Not_found ->
+        match Re.Group.all (Re.exec rr self.raw.stderr) with
+        | [|_; s|] -> int_of_string_opt s
+        | _
+        | exception Not_found -> None
+  in
   let res =
     match Prover.analyze_p_opt self.program self.raw with
     | Some x -> x
     | None ->
-      if self.raw.errcode = 0 then Res.Unknown
-      else if self.raw.rtime > float_timeout self.timeout then Res.Timeout
-      else Res.Error
+      if self.raw.errcode = 0 then Res.mk Unknown
+      else if self.raw.rtime > float_timeout self.timeout then Res.mk Timeout
+      else Res.mk Error
   in
-  { self with res }
+  { self with res = { res with steps } }
 
 let analyze_self self =
   self |> analyze_self_ |> map ~f:Prover.name
 
 let make_from_prover (p:Prover.t) ~timeout problem
     (raw:Run_proc_result.t) : (Prover.name, Res.t) t =
-  { program=p; problem; res=Res.Unknown; timeout; raw }
+  { program=p; problem; res=Res.mk Unknown; timeout; raw }
   |> analyze_self
 
 let make_from_checker

@@ -2,13 +2,20 @@
 
 (** {1 Result of a single job} *)
 
-type t =
+type res =
   | Sat
   | Unsat
   | Unknown
   | Timeout
   | Error
   | Tag of string
+
+type t = {
+  res: res;
+  steps: int option;
+}
+
+val mk: ?steps:int -> res -> t
 
 val compare: t -> t -> [`Same | `LeftBetter | `RightBetter | `Mismatch]
 (** [compare a b] compares results [a] and [b] (assuming they are results
@@ -24,5 +31,5 @@ val compare: t -> t -> [`Same | `LeftBetter | `RightBetter | `Mismatch]
 
 val pp : t CCFormat.printer
 val to_string : t -> string
-val of_string : tags:string list -> string -> t
+val of_string : ?steps:int -> tags:string list -> string -> t
 

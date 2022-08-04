@@ -37,11 +37,11 @@ module Exp_ = struct
     let content = CCIO.with_in file CCIO.read_all in
     begin match Re.exec_opt re_expect_ content with
       | Some g ->
-        if Re.Mark.test g m_unsat_ then Res.Unsat
-        else if Re.Mark.test g m_sat_ then Res.Sat
-        else if Re.Mark.test g m_unknown_ then Res.Unknown
-        else if Re.Mark.test g m_timeout_ then Res.Timeout
-        else if Re.Mark.test g m_error_ then Res.Error
+        if Re.Mark.test g m_unsat_ then Res.mk Unsat
+        else if Re.Mark.test g m_sat_ then Res.mk Sat
+        else if Re.Mark.test g m_unknown_ then Res.mk Unknown
+        else if Re.Mark.test g m_timeout_ then Res.mk Timeout
+        else if Re.Mark.test g m_error_ then Res.mk Error
         else Error.failf "could not parse the content of the `expect:` field in `%s`" file
       | None ->
         begin match default with
@@ -59,7 +59,7 @@ let find_expect ?default_expect ~expect file : Res.t =
   let rec loop expect =
     match expect with
     | Dir.E_comment -> Exp_.find_expected_ ?default:default_expect file
-    | Dir.E_const r -> r
+    | Dir.E_const { res; _ } -> Res.mk res
     | Dir.E_try l ->
       let rec try_ = function
         | [] ->
@@ -91,7 +91,7 @@ let make_find_expect ~expect file : t =
 
 let compare_res pb res =
   let open Res in
-  match pb.expected, res with
+  match pb.expected.res, res.res with
   | Unsat, Unsat
   | Sat, Sat
   | Timeout, Timeout

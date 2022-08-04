@@ -38,6 +38,7 @@ type t = {
   unsat   : string option;  (* regex for "unsat" *)
   sat     : string option;  (* regex for "sat" *)
   unknown : string option;  (* regex for "unknown" *)
+  steps   : string option;  (* regex for the number of "steps" *)
   timeout : string option;  (* regex for "timeout" *)
   memory  : string option;  (* regex for "out of memory" *)
   custom  : (string * string) list; (* custom tags *)
@@ -104,11 +105,11 @@ end
 
 let pp out self =
   let open Misc.Pp in
-  let {name; version; cmd; ulimits; unsat; sat; timeout; unknown; memory;
-       binary; custom; produces_proof; proof_ext; inherits; proof_checker;
-       binary_deps=_; defined_in} = self in
+  let {name; version; cmd; ulimits; sat; unsat; unknown; steps;
+       timeout; memory; binary; custom; produces_proof; proof_ext; inherits;
+       proof_checker; binary_deps=_; defined_in} = self in
   Fmt.fprintf out
-    "(@[<hv1>prover%a%a%a%a%a%a%a%a%a%a%a%a%a%a%a%a@])"
+    "(@[<hv1>prover%a%a%a%a%a%a%a%a%a%a%a%a%a%a%a%a%a@])"
     (pp_f "name" pp_str) name
     (pp_f "version" Version.pp) version
     (pp_f "cmd" pp_str) cmd
@@ -116,9 +117,10 @@ let pp out self =
     (pp_f "ulimit" Ulimit.pp) ulimits
     (pp_opt "sat" pp_regex) sat
     (pp_opt "unsat" pp_regex) unsat
+    (pp_opt "unknown" pp_regex) unknown
+    (pp_opt "steps" pp_regex) steps
     (pp_opt "memory" pp_regex) memory
     (pp_opt "timeout" pp_regex) timeout
-    (pp_opt "unknown" pp_regex) unknown
     (pp_opt "defined_in" pp_str) defined_in
     (pp_f "produces_proof" Fmt.bool) produces_proof
     (pp_opt "produces_proof" pp_str) proof_ext
@@ -204,15 +206,16 @@ let analyze_p_opt (self:t) (r:Run_proc_result.t) : Res.t option =
     | None -> false
     | Some re -> find_ re
   in
-  if find_opt_ self.sat then Some Res.Sat
-  else if find_opt_ self.unsat then Some Res.Unsat
-  else if find_opt_ self.timeout then Some Res.Timeout
-  else if find_opt_ self.unknown then Some Res.Unknown
+  if find_opt_ self.sat then Some (Res.mk Sat)
+  else if find_opt_ self.unsat then Some (Res.mk Unsat)
+  else if find_opt_ self.timeout then Some (Res.mk Timeout)
+  else if find_opt_ self.unknown then Some (Res.mk Unknown)
   else (
     (* look for custom tags *)
-    CCList.find_map
-      (fun (tag,re) -> if find_ re then Some (Res.Tag tag) else None)
-      self.custom
+    CCList.find_map (
+      fun (tag,re) ->
+        if find_ re then Some (Res.mk (Tag tag)) else None
+    ) self.custom
   )
 
 let db_prepare (db:Db.t) : unit =
@@ -225,6 +228,7 @@ let db_prepare (db:Db.t) : unit =
       unsat text not null,
       sat text not null,
       unknown text not null,
+      steps text not null,
       timeout text not null,
       memory text not null,
       ulimit_time text not null,
@@ -249,16 +253,18 @@ let db_prepare (db:Db.t) : unit =
 let to_db db (self:t) : unit =
   let str_or = CCOpt.get_or ~default:"" in
   Db.exec_no_cursor db
-    {|insert into prover values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) on conflict do nothing;
+    {|insert into prover values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        on conflict do nothing;
       |}
     ~ty:Db.Ty.([text; text; blob; text; text; text; text; text;
-                text; text; text; text; text; text; text])
+                text; text; text; text; text; text; text; text])
     self.name
     (Version.ser_sexp self.version)
     self.binary
     (self.unsat |> str_or)
     (self.sat |> str_or)
     (self.unknown |> str_or)
+    (self.steps |> str_or)
     (self.timeout |> str_or)
     (self.memory |> str_or)
     (self.ulimits.time |> string_of_bool)
@@ -341,13 +347,14 @@ let of_db db name : t =
   in
   Db.exec db
     {|select
-            version, binary, unsat, sat, unknown, timeout, memory
+            version, binary, unsat, sat, unknown, steps, timeout, memory
            from prover where name=? ; |}
     name
     ~f:Db.Cursor.next
     ~ty:Db.Ty.([text],
-               [any_str; any_str; any_str; any_str; any_str; any_str; any_str],
-               fun version binary unsat sat unknown timeout memory ->
+               [any_str; any_str; any_str; any_str; any_str; any_str; any_str;
+                any_str],
+               fun version binary unsat sat unknown steps timeout memory ->
                  let version =
                    Version.deser_sexp version |> Error.unwrap
                  in
@@ -355,11 +362,13 @@ let of_db db name : t =
                  let sat = nonnull sat in
                  let unsat = nonnull unsat in
                  let unknown = nonnull unknown in
+                 let steps = nonnull steps in
                  let timeout = nonnull timeout in
                  let memory = nonnull memory in
                  { name; cmd; binary_deps=[]; defined_in=None; custom;
                    inherits; produces_proof; proof_ext; proof_checker;
-                   version; binary; ulimits; unsat;sat;unknown;timeout;memory})
+                   version; binary; ulimits; unsat;sat;unknown; steps;
+                   timeout;memory})
   |> Misc.unwrap_db (fun() -> spf "reading data for prover '%s'" name)
   |> Error.unwrap_opt (spf "no prover by the name '%s'" name)
 

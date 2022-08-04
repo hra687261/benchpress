@@ -33,6 +33,7 @@ let db_prepare (db:Db.t) : unit =
         prover text not null,
         file text not null,
         res text not null,
+        steps int not null,
         file_expect text not null,
         timeout int,
         errcode int not null,
@@ -65,12 +66,13 @@ let db_prepare (db:Db.t) : unit =
 let to_db_prover_result (db:Db.t) (self:(Prover.name,_) Run_result.t) : _ =
   Db.exec_no_cursor db
     {|insert into prover_res
-    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     |}
-    ~ty:Db.Ty.([text; text; text; text; int; int; blob; blob; float; float; float])
+    ~ty:Db.Ty.([text; text; text; int; text; int; int; blob; blob; float; float; float])
     self.program
     self.problem.Problem.name
     (self.res |> Res.to_string)
+    (CCOpt.value self.res.steps ~default:(-1))
     (self.problem.Problem.expected |> Res.to_string)
     (self.timeout |> Limit.Time.as_int Seconds)
     self.raw.errcode
@@ -100,19 +102,22 @@ let of_db_provers_map db ~f : _ list =
   let tags = Prover.tags_of_db db in
   Db.exec_no_params db {|
     select
-      prover, file, res, file_expect, timeout, errcode, stdout, stderr,
+      prover, file, res, steps, file_expect, timeout, errcode, stdout, stderr,
       rtime, utime, stime
      from prover_res;
     |}
     ~ty:Db.Ty.(
-        p4 text text text text @>> p2 int int @>> p2 blob blob @>> p3 float float float,
-        (fun pname pb_name res expected timeout errcode stdout stderr rtime utime stime ->
+        p5 text text text int text @>> p2 int int @>> p2 blob blob @>> p3 float float float,
+        (fun pname pb_name res steps expected timeout errcode stdout stderr rtime utime stime ->
+           let steps = if steps < 0 then None else Some steps in
            let pb =
-             {Problem.name=pb_name; expected=Res.of_string ~tags expected}
+             { Problem.name=pb_name;
+               expected=Res.of_string ?steps ~tags expected}
            in
            let timeout = Limit.Time.mk ~s:timeout () in
            let p =
-             Run_result.make pname pb ~timeout ~res:(Res.of_string ~tags res)
+             Run_result.make pname pb ~timeout
+               ~res:(Res.of_string ?steps ~tags res)
                {errcode;stderr;stdout;rtime;utime;stime}
            in
            f p))

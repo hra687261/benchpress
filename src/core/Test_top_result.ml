@@ -152,7 +152,7 @@ let to_table ?offset ?page_size ?provers (self:t): table =
   db_to_table ?offset ?page_size ?provers self.db
 
 let time_to_csv (_:Res.t) f = Printf.sprintf "%.2f" f
-let res_to_csv (r:Res.t) = match r with
+let res_to_csv (r:Res.t) = match r.res with
   | Res.Error -> "error"
   | Res.Timeout -> "timeout"
   | Res.Unknown -> "unknown"
