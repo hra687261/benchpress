@@ -13,7 +13,6 @@ module Exec_run_provers : sig
     checkers: Proof_checker.t Misc.Str_map.t;
     limits : Limit.All.t;
     proof_dir: string option;
-    db_file: string option;
   }
 
   val expand :
@@ -23,8 +22,6 @@ module Exec_run_provers : sig
     ?proof_dir:string ->
     ?interrupted:(unit -> bool) ->
     Definitions.t ->
-    ?pb_file:string ->
-    ?db_file:string ->
     Limit.All.t ->
     int option ->
     string option ->
@@ -58,10 +55,11 @@ module Exec_run_provers : sig
     ?on_proof_check:(Test.proof_check_result -> unit) ->
     ?on_done:(Test_compact_result.t -> unit) ->
     ?interrupted:(unit -> bool) ->
-    ?config_file:string ->
     ?partition:string ->
-    ?nodes:int ->
-    ?db_file:string ->
+    nodes:int ->
+    addr:Unix.inet_addr ->
+    port:int ->
+    ntasks:int ->
     uuid:Uuidm.t ->
     save:bool ->
     expanded ->

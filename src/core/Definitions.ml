@@ -80,8 +80,6 @@ let all_tasks self : _ list =
   |> Iter.filter_map (function D_task t -> Some t | _ -> None)
   |> Iter.to_rev_list
 
-let config_file { config_file; _ } = config_file
-
 (* compute a version for the prover *)
 let get_version ?(binary="") (v:Stanza.version_field) : Prover.version =
   begin match v with
@@ -172,48 +170,46 @@ let mk_limits ?timeout ?memory ?stack () =
     ) stack in
   Limit.All.mk ?time ?memory ?stack ()
 
-let mk_run_provers ?j ?timeout ?memory ?stack
-    ?pattern ?db_file ?pb_file ~paths ~provers ~loc
+let mk_run_provers ?j ?timeout ?memory ?stack ?pattern ~paths ~provers ~loc
     (self:t) : Action.run_provers =
   let provers = CCList.map (find_prover' self) provers in
   let dirs = CCList.map (mk_subdir self) paths in
   let limits = mk_limits ?timeout ?memory ?stack () in
-  Action.{ db_file; pb_file; j; limits; dirs; provers; pattern; loc }
+  Action.{ j; limits; dirs; provers; pattern; loc }
 
 let mk_run_provers_slurm_submission
-    ?partition ?nodes ?db_file
-    ?j ~paths ?timeout ?memory ?stack ?pattern ~provers ~loc
+    ?j ~paths ?timeout ?memory ?stack ?pattern ~provers ?loc
+    ?partition ?nodes ?addr ?port ?ntasks
     (self:t) : Action.run_provers_slurm_submission =
-  let map_stricly_positive_opt =
-    CCOpt.map_or ~default:None (CCOpt.if_ ((<) 0))
+  let ge_val opt min def =
+    match opt with Some v when v >= min -> v | _ -> def
   in
   let provers = CCList.map (find_prover' self) provers in
   let dirs = CCList.map (mk_subdir self) paths in
   let limits = mk_limits ?timeout ?memory ?stack () in
-  let nodes = map_stricly_positive_opt nodes in
-  { partition; nodes; db_file; j;
-    provers; dirs; pattern; limits; loc;
-  }
+  let nodes = ge_val nodes 1 1 in
+  let addr = CCOpt.value addr ~default:(Misc.localhost_addr ()) in
+  let port = ge_val port 0 8080 in
+  let j = Some (ge_val j 1 4) in
+  let ntasks = ge_val ntasks 1 10 in
+  { partition; nodes; j; addr; port; ntasks;
+    provers; dirs; pattern; limits; loc;}
 
 let rec mk_action (self:t) (a:Stanza.action) : _ =
   match a with
-  | Stanza.A_run_provers {
-      provers; memory; dirs; timeout; stack; pattern; j; pb_file; db_file; loc
-    } ->
+  | Stanza.A_run_provers {provers; memory; dirs; timeout; stack; pattern; j; loc } ->
     let a =
       mk_run_provers
-        ?j ?timeout ?memory ?stack ?pattern ~loc:(Some loc)
-        ?pb_file ?db_file ~paths:dirs ~provers self
+        ?j ?timeout ?memory ?stack ?pattern ~loc:(Some loc) ~paths:dirs ~provers self
     in
     Action.Act_run_provers a
   | Stanza.A_run_provers_slurm {
-      provers; memory; dirs; timeout; stack; pattern;
-      partition; nodes; j; db_file; loc;
+      provers; memory; dirs; timeout; stack; pattern; j;
+      partition; nodes; addr; port; ntasks; loc;
     } ->
     let a =
-      mk_run_provers_slurm_submission ?j
-        ?timeout ?memory ?stack ?pattern ~loc:(Some loc) ?partition ?nodes
-        ?db_file ~paths:dirs ~provers self
+      mk_run_provers_slurm_submission ?j ?timeout ?memory ?stack ?pattern ~loc
+        ~paths:dirs ~provers ?partition ?nodes ?addr ?port ?ntasks self
     in
     Action.Act_run_slurm_submission a
   | Stanza.A_progn l ->

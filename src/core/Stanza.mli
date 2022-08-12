@@ -28,8 +28,6 @@ type git_fetch = GF_fetch | GF_pull
 
 type action =
   | A_run_provers of {
-      db_file: string option;
-      pb_file: string option;
       j: int option;
       dirs: string list; (* list of directories to examine *)
       pattern: regex option;
@@ -40,9 +38,6 @@ type action =
       loc: Loc.t;
     }
   | A_run_provers_slurm of {
-      partition: string option;
-      nodes: int option;
-      db_file: string option;
       j: int option;
       dirs: string list; (* list of directories to examine *)
       pattern: regex option;
@@ -50,6 +45,11 @@ type action =
       timeout: int option;
       memory: int option;
       stack : stack_limit option;
+      partition: string option;
+      nodes: int option;
+      addr: Unix.inet_addr option;
+      port: int option;
+      ntasks: int option;
       loc: Loc.t;
     }
   | A_git_checkout of {
@@ -156,3 +156,7 @@ val parse_string :
   filename:string -> string -> t list
 (** Parse a string. See {!parse_files} for the arguments.
     @param filename name used in locations *)
+
+val prover_wl_to_st : Prover.t With_loc.t -> t
+
+val proof_checker_wl_to_st : Proof_checker.t With_loc.t -> t

@@ -115,14 +115,3 @@ let pp out p =
 
 let name p = p.name
 let to_string = CCFormat.to_string pp
-
-let pb_list_to_file (problems: t list) path =
-  let oc = open_out path in
-  Marshal.to_channel oc problems [];
-  close_out oc
-
-let pb_list_of_file path =
-  let ic = open_in path in
-  let problems: t list = Marshal.from_channel ic in
-  close_in ic;
-  problems

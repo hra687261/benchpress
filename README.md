@@ -47,7 +47,11 @@ Most of the commands accept `-c <config file>` to specify which config files to 
   * `-F <file>` read list of problems from given file
   * `-p <prover1,prover2>` list of provers to use
   * `--task <profile>` specify which task to use
-  * `--nodes`: number of nodes to allocate for the execution
+  * `--nodes`: max number of nodes to allocate for the workers (one worker by node)
+  * `--partition`: the partition to which the allocated nodes need to belong
+  * `--ntasks`: number of tasks to give the workers at a time
+  * `--addr`: IP of the server with which the workers communicate
+  * `--port`: port of the server
 - `benchpress dir config` shows the configuration directory
 - `benchpress dir state` shows the directory where the state (benchmark results) is stored
 - `benchpress check-config <file>` to check that the file is valid configuration
@@ -218,11 +222,14 @@ same repository).
   * `(timeout n)` (optional) defines a timeout in seconds
   * `(memory n)` (optional) defines a memory limit in MB
   * `(pattern regex)` (optional) an additional regex for files to consider in `dirs`
-  * `(db_file n)` (optional) defines a file in which to store the database
   * `(j n)` (optional) defines the number of concurrent threads to use when running the provers
-- `(run_provers_slurm fields)` to run some provers on some benchmarks using the computing power of a slurm cluster. The fields are mainly the same as those of the `run_provers` except that they apply to each the instances on benchpress that will be lunched on the cluster's nodes. There are also additional fields:
+- `(run_provers_slurm fields)` to run some provers on some benchmarks using the computing power of a slurm cluster. Most of the fields are the same as those of the `run_provers` except that they apply to every worker running on the allocated compute nodes. There are also additional fields:
+  * `(j n)` (optional) the number of concurrent threads to be used by each worker deployed on an allocated compute node. (default is 4).
+  * `(partition s)`: (optional) the name of the partition to which the allocated compute nodes need to belong.
   * `(nodes n)`: (optional) the number of nodes to allocate to the action (default is 1).
-  * `(j n)` (optional) defines the number of concurrent threads to use for each parallel instance of benchpress (default is 4).
+  * `(addr s)`: (optional) the IP address on which the server which will be deployed on the control node should listen on.
+  * `(port n)`: (optional) the port on which the server should listen on.
+  * `(ntasks n)`: (optional) the number of tasks that will be sent to the workers at a time.
 - `(progn a1 … an)` runs actions in sequence. Fails if any action fails.
 - `(run_cmd "the command")` runs the given command.
 - `(git_checkout (dir d) (ref r) [(fetch_first fetch|pull)])` specifies
@@ -239,7 +246,11 @@ same repository).
       (dirs ($PATHS))
       (provers (z3 cvc4))
       (timeout 2)
-      (nodes 2))))
+      (j 4)
+      (nodes 2)
+      (addr "xxx.xxx.xx.xxx")
+      (port 8080)
+      (ntasks 20)
+      )))
 ```
-
-assuming that $PATHS are paths to directories containing smt-lib2 benchmarks which were previously defined in the config file.
+assuming that $PATHS are paths to directories containing benchmarks which were previously defined in the config file.

@@ -11,11 +11,8 @@ let execute_run_prover_action
   begin
     Error.guard (Error.wrapf "run prover action@ `@[%a@]`" Action.pp_run_provers r) @@ fun () ->
     let interrupted = CCLock.create false in
-    let r =
-      Exec_action.Exec_run_provers.expand
-        ?dyn ?j ?proof_dir ?limits defs
-        ?pb_file:r.pb_file ?db_file:r.db_file
-        r.limits r.j r.pattern r.dirs r.provers
+    let r = Exec_action.Exec_run_provers.expand
+        ?dyn ?j ?proof_dir ?limits defs r.limits r.j r.pattern r.dirs r.provers
     in
     let len = List.length r.problems in
     Notify.sendf notify "testing with %d provers, %d problems…"
@@ -36,31 +33,34 @@ let execute_run_prover_action
   end
 
 let execute_submit_job_action
-    ?j ?timestamp ?dyn ?limits ?proof_dir ~notify
+    ?pp_results ?j ?timestamp ?dyn ?limits ?proof_dir ~notify
     ~(uuid: Uuidm.t) ~(save: bool)
     (defs: Definitions.t) (r:Action.run_provers_slurm_submission)
   : (_ * Test_compact_result.t) =
   Error.guard (Error.wrapf "run prover slurm action@ `@[%a@]`" Action.pp_run_provers_slurm r) @@ fun () ->
   let interrupted = CCLock.create false in
-  let nodes = r.nodes in
   let exp_r =
     Exec_action.Exec_run_provers.expand
       ?dyn ?j ?proof_dir ?limits defs
-      ?db_file:r.db_file r.limits r.j r.pattern r.dirs r.provers
+      r.limits r.j r.pattern r.dirs r.provers
   in
   let len = List.length exp_r.problems in
   Notify.sendf notify "testing with %d provers, %d problems…"
     (List.length r.provers) len;
+  let progress =
+    Exec_action.Progress_run_provers.make ?pp_results ?dyn exp_r in
   (* submit job *)
-  let config_file = Definitions.config_file defs in
   let result =
     Error.guard (Error.wrapf "running %d tests" len) @@ fun () ->
     Exec_action.Exec_run_provers.run_sbatch_job
-      ~uuid ?timestamp
-      ~interrupted:(fun () ->
-          CCLock.get interrupted)
-      ?db_file:exp_r.db_file ?config_file ?partition:r.partition
-      ?nodes ~save exp_r
+      ~uuid ?timestamp ~interrupted:(fun () -> CCLock.get interrupted)
+      ?partition:r.partition ~nodes:r.nodes ~addr:r.addr ~port:r.port
+      ~ntasks:r.ntasks ~save
+      ~on_solve:progress#on_res
+      ~on_start_proof_check:(fun() -> progress#on_start_proof_check)
+      ~on_proof_check:progress#on_proof_check_res
+      ~on_done:(fun _ -> progress#on_done)
+      exp_r
   in
   result
 
@@ -71,7 +71,7 @@ type top_task =
 
 let main ?j ?pp_results ?dyn ?timeout ?memory ?csv ?(provers=[])
     ?meta:_ ?summary ?task ?dir_file ?proof_dir ?(save=true)
-    ?(sbatch = false) ?db_file ?pb_file ?partition ?nodes
+    ?(sbatch = false) ?partition ?nodes ?addr ?port ?ntasks
     (defs:Definitions.t) paths () : unit =
   Log.info
     (fun k->k"run-main.main for paths %a" (Misc.pp_list Misc.Pp.pp_str) paths);
@@ -91,40 +91,9 @@ let main ?j ?pp_results ?dyn ?timeout ?memory ?csv ?(provers=[])
       let t = Definitions.find_task defs task_name in
       begin match t with
         | {view={Task.action=Action.Act_run_provers r;_};loc} when sbatch->
+          Log.warn (fun k->k "Calling benchpress in slurm mode on a normal run task!");
           Error.guard (Error.wrap ~loc "running task 'run provers with slurm'") @@ fun () ->
-          let rr: Action.run_provers_slurm_submission =
-            Definitions.mk_run_provers_slurm_submission
-              ?partition ?nodes ?j ~paths ?db_file ?timeout ?memory ~provers
-              ~loc:None defs
-          in
-          let paths = CCList.map (Definitions.mk_subdir defs) paths in
-          let provers =
-            CCList.map (Definitions.find_prover' defs) provers @ r.provers
-            |> CCList.sort_uniq ~cmp:Prover.compare_by_name
-          in
-          TT_run_slurm_submission ({
-              rr with
-              provers;
-              dirs=paths @ r.dirs
-            },defs)
-
-        | {view={Task.action=Action.Act_run_provers r;_};loc} ->
-          Error.guard (Error.wrap ~loc "running task 'run provers'") @@ fun () ->
-          (* convert paths and provers *)
-          let paths = CCList.map (Definitions.mk_subdir defs) paths in
-          let provers = CCList.map (Definitions.find_prover' defs) provers in
-          let provers =
-            provers @ r.provers
-            |> CCList.sort_uniq ~cmp:Prover.compare_by_name
-          in
-          let r = {r with provers; dirs=paths @ r.dirs; pb_file; db_file; } in
-          TT_run_provers (r,defs)
-
-        | {view={Task.action=Action.Act_run_slurm_submission r;_};loc} ->
-          Error.guard (Error.wrap ~loc "running task 'run provers'") @@ fun () ->
-          let nodes = CCOpt.(<+>) nodes r.nodes in
           let j = CCOpt.(<+>) j r.j in
-          let db_file = CCOpt.(<+>) db_file r.db_file in
           let timeout = CCOpt.(<+>) timeout (
               CCOpt.map_or ~default:None
                 (fun t -> Some (Limit.Time.as_int Seconds t))
@@ -135,21 +104,50 @@ let main ?j ?pp_results ?dyn ?timeout ?memory ?csv ?(provers=[])
                 (fun t -> Some (Limit.Memory.as_int Megabytes t))
                 r.limits.memory)
           in
-          let rr: Action.run_provers_slurm_submission =
-            Definitions.mk_run_provers_slurm_submission
-              ?nodes ?j ~paths ?db_file ?timeout ?memory ~provers
-              ~loc:None defs
+          let r =
+            let r_ = Definitions.mk_run_provers_slurm_submission
+                ?partition ?nodes ?j ?addr ?port ?ntasks
+                ~paths ?timeout ?memory ~provers ?loc:r.loc defs
+            in
+            { r_ with
+              provers =
+                r_.provers @ r.provers
+                |> CCList.sort_uniq ~cmp:Prover.compare_by_name;
+              dirs= r_.dirs @ r.dirs }
           in
+          TT_run_slurm_submission (r,defs)
+
+        | {view={Task.action=Action.Act_run_provers r;_};loc} ->
+          Error.guard (Error.wrap ~loc "running task 'run provers'") @@ fun () ->
+          (* convert paths and provers *)
           let paths = CCList.map (Definitions.mk_subdir defs) paths in
+          let provers = CCList.map (Definitions.find_prover' defs) provers in
           let provers =
-            CCList.map (Definitions.find_prover' defs) provers @ r.provers
+            provers @ r.provers
             |> CCList.sort_uniq ~cmp:Prover.compare_by_name
           in
-          TT_run_slurm_submission ({
-              rr with
-              provers;
-              dirs=paths @ r.dirs
-            },defs)
+          let r = {r with provers; dirs=paths @ r.dirs} in
+          TT_run_provers (r,defs)
+
+        | {view={Task.action=Action.Act_run_slurm_submission r;_};loc} ->
+          Error.guard (Error.wrap ~loc "running task 'run provers with slurm'") @@ fun () ->
+          let r = {
+            r with
+            nodes = CCOpt.value ~default:r.nodes nodes;
+            j = CCOpt.(<+>) j r.j;
+            limits = {
+              r.limits with
+              time = CCOpt.map_or ~default:r.limits.time
+                  (fun s -> Some (Limit.Time.mk ~s ())) timeout;
+              memory = CCOpt.map_or ~default:r.limits.memory
+                  (fun m -> Some (Limit.Memory.mk ~m ())) memory
+            };
+            provers =
+              CCList.map (Definitions.find_prover' defs) provers @ r.provers
+              |> CCList.sort_uniq ~cmp:Prover.compare_by_name;
+            dirs= CCList.map (Definitions.mk_subdir defs) paths @ r.dirs;
+          } in
+          TT_run_slurm_submission (r,defs)
 
         | {loc=_;view=t} ->
           TT_other t.action
@@ -158,7 +156,8 @@ let main ?j ?pp_results ?dyn ?timeout ?memory ?csv ?(provers=[])
     | None when sbatch ->
       let r: Action.run_provers_slurm_submission =
         Definitions.mk_run_provers_slurm_submission
-          ?nodes ?j ~paths ?db_file ?timeout ?memory ~provers ~loc:None defs
+          ?partition ?nodes ?j ?addr ?port ?ntasks
+          ~paths ?timeout ?memory ~provers defs
       in
       TT_run_slurm_submission (r,defs)
 
@@ -170,8 +169,7 @@ let main ?j ?pp_results ?dyn ?timeout ?memory ?csv ?(provers=[])
       in
       let provers = CCList.sort_uniq ~cmp:Prover.compare_name provers in (* deduplicate *)
       let r =
-        Definitions.mk_run_provers ?db_file ?pb_file ~loc:None ?timeout ?memory ?j ~provers ~paths defs
-      in
+        Definitions.mk_run_provers ~loc:None ?timeout ?memory ?j ~provers ~paths defs in
       TT_run_provers (r, defs)
   in
   begin match tt_task with
@@ -215,9 +213,8 @@ let main ?j ?pp_results ?dyn ?timeout ?memory ?csv ?(provers=[])
       let uuid = Misc.mk_uuid() in
 
       let (top_res, (results:Test_compact_result.t)) =
-        execute_submit_job_action
-          ~uuid ?proof_dir ?dyn:progress ~limits ?j ~notify ~timestamp ~save
-          defs run_provers_action_sbatch
+        execute_submit_job_action ?pp_results ~uuid ?proof_dir ?dyn:progress
+          ~limits ?j ~notify ~timestamp ~save defs run_provers_action_sbatch
       in
       if CCOpt.is_some csv then (
         let res = Lazy.force top_res in

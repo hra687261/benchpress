@@ -342,87 +342,64 @@ module Json = struct
   let to_string (self:t) : string = Fmt.asprintf "%a" pp self
 end
 
-(** [split_list l n] splits the list l into at most n sublists *)
-let split_list l n =
-  let len = List.length l in
-  let divres = len / n in
-  let rec aux n rempb l acc lacc =
-    match l with
-    | h :: t when n = divres ->
-      if rempb > 0
-      then aux 0 (rempb - 1) t [] ((List.rev (h :: acc)) :: lacc)
-      else aux 1 0 t [h] (List.rev acc :: lacc)
-    | h :: t ->
-      aux (n + 1) rempb t (List.rev (h :: acc)) lacc
-    | [] when acc = [] ->
-      List.rev lacc
-    | [] ->
-      List.rev (acc :: lacc)
-  in
-  aux 0 (len mod n) l [] []
 
-(** Make a unique filename *)
-let mk_uniq_filename
-    ?(pref = "") ?(ext = "") timestamp uuid =
-  Format.sprintf "%s%s-%s%s" pref
-    (match Ptime.of_float_s timestamp with
-     | None -> Printf.sprintf "<time %.1fs>" timestamp
-     | Some t -> datetime_compact t)
-    (Uuidm.to_string uuid)
-    ext
-
-module Shell = struct
-  (** [mk_cmd ?options ?target exec] makes a command that executes [exec] with the options [options] on the target [target]. *)
-  let mk_cmd ?(options = []) ?target exec =
-    let buf = Buffer.create 32 in
-    Buffer.add_string buf exec;
-    List.iter (
-      fun (k, v_opt) ->
-        Buffer.add_string buf (
-          match v_opt with
-          | Some v -> " "^k^" "^v
-          | None -> " "^k
-        )
-    ) options;
-    CCOption.iter (
-      fun s ->
-        Buffer.add_string buf (" "^s)
-    ) target;
-    Buffer.contents buf
-
-  (** [copy src dest] copies the file in [src] to [dest]. *)
-  let copy src dest =
-    let cmd =
-      mk_cmd "cp" ~options:[ src, None; dest, None; ]
-    in
-    if Sys.command cmd <> 0
-    then Error.fail (
-        Format.sprintf
-          "Failed to copy the file \"%s\" to \"%s\""
-          src dest
+(** [mk_shell_cmd ?options ?target exec] makes a command that executes [exec] \
+    with the options [options] on the target [target]. *)
+let mk_shell_cmd ?(options = []) ?target exec =
+  let buf = Buffer.create 32 in
+  Buffer.add_string buf exec;
+  List.iter (
+    fun (k, v_opt) ->
+      Buffer.add_string buf (
+        match v_opt with
+        | Some v -> " "^k^" "^v
+        | None -> " "^k
       )
+  ) options;
+  CCOption.iter (fun s -> Buffer.add_string buf (" "^s)) target;
+  Buffer.contents buf
 
-  (** [rm path] deletes the file located in [path]. *)
-  let rm path =
-    let ret =
-      Sys.command (mk_cmd "rm" ~target:path)
-    in
-    if ret <> 0
-    then Error.fail (
-        Format.sprintf
-          "Failed to delete the file \"%s\""
-          path
-      )
+let pp_inet_addr fmt a =
+  Format.fprintf fmt "%s" (Unix.string_of_inet_addr a)
 
-  (** [empty_file path] Empties the file at [path] or creates an empty file if it doesn't exist. *)
-  let empty_file path =
-    let cmd =
-      mk_cmd "truncate" ~options:["-s", Some "0"] ~target:path
-    in
-    if Sys.command cmd <> 0
-    then Error.fail (
-        Format.sprintf
-          "Could not empty or create the file \"%s\""
-          path
-      )
-end
+let pp_unix_addr fmt addr =
+  match addr with
+  | Unix.ADDR_UNIX s ->
+    Format.fprintf fmt "ADDR_UNIX %s" s
+  | Unix.ADDR_INET (addr, id) ->
+    Format.fprintf fmt "ADDR_INET (%a, %d)" pp_inet_addr addr id
+
+let ip_addr_conv =
+  Cmdliner.Arg.conv (
+    ( fun str ->
+        try Ok (Unix.inet_addr_of_string str)
+        with Failure s -> Error (`Msg s)),
+    ( fun fmt addr ->
+        Format.fprintf fmt "%s" (Unix.string_of_inet_addr addr))
+  )
+
+let localhost_addr () =
+  (Unix.gethostbyname (Unix.gethostname ())).Unix.h_addr_list.(0)
+
+let rec accept_non_intr s =
+  try Unix.accept ~cloexec:true s
+  with Unix.Unix_error (EINTR, _, _) -> accept_non_intr s
+
+(** [establish_server n server_fun sockaddr] same as [Unix.establish_server],
+    but it uses threads instead of forking the process after each connection,
+    and only accepts [n] connections. *)
+let establish_server n server_fun sockaddr =
+  let open Unix in
+  let sock =
+    socket ~cloexec:true (domain_of_sockaddr sockaddr) SOCK_STREAM 0 in
+  setsockopt sock SO_REUSEADDR true;
+  bind sock sockaddr;
+  listen sock 5;
+  CCThread.Arr.join @@
+  CCThread.Arr.spawn n (
+    fun _ ->
+      let (s, _caller) = accept_non_intr sock in
+      let inchan = in_channel_of_descr s in
+      let outchan = out_channel_of_descr s in
+      server_fun inchan outchan;
+  )

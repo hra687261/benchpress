@@ -6,8 +6,6 @@ type path = string
 (** {1 Actions} *)
 
 type run_provers = {
-  db_file: string option;
-  pb_file: string option;
   j: int option; (* number of concurrent processes *)
   dirs: Subdir.t list; (* list of directories to examine *)
   provers: Prover.t list;
@@ -19,13 +17,20 @@ type run_provers = {
 type run_provers_slurm_submission = {
   partition: string option;
   (* The partition to which the allocated nodes should belong. *)
-  nodes: int option;
-  (* the number of nodes that need to be allocated for the job.
-     One instance of benchpress will run on each node. *)
-  db_file: string option;
-  (* the file in which to store the database *)
+  nodes: int;
+  (* the maximum number of nodes that can be allocated for the job.
+     One worker will run per node *)
+  addr: Unix.inet_addr;
+  (* IP address of the server on the control node.
+     Needs to be reachable by the workers which will run on the allocated calculation nodes. *)
+  port: int;
+  (* port of the server in the control node. *)
   j: int option;
-  (* number of concurrent processes *)
+  (* number of parallel threads that will be launched by the workers.
+     Default is 4. *)
+  ntasks: int;
+  (* The number of tasks to give the workers at a time.
+     Default is equal to the number of threads. *)
   dirs: Subdir.t list; (* list of problems *)
   provers: Prover.t list;
   pattern: string option;
@@ -54,10 +59,8 @@ type t =
 
 let pp_run_provers out (self:run_provers) =
   let open Misc.Pp in
-  let { db_file; pb_file; dirs; provers; limits; j; pattern; loc=_; }: run_provers = self in
-  Fmt.fprintf out "(@[<v1>run_provers%a%a%a%a%a%a%a%a%a@])"
-    (pp_opt "pb_file" Fmt.string) pb_file
-    (pp_opt "db_file" Fmt.string) db_file
+  let {dirs; provers; limits; j; pattern; loc=_; }: run_provers = self in
+  Fmt.fprintf out "(@[<v1>run_provers%a%a%a%a%a%a%a@])"
     (pp_f "dirs" (pp_l Subdir.pp)) dirs
     (pp_f "provers" (pp_l Prover.pp_name)) provers
     (pp_opt "pattern" pp_regex) pattern
@@ -69,14 +72,16 @@ let pp_run_provers out (self:run_provers) =
 let pp_run_provers_slurm out (self:run_provers_slurm_submission) =
   let open Misc.Pp in
   let {
-    partition; nodes; db_file;
-    j; dirs; provers; pattern; limits; _
+    partition; nodes; j; dirs; provers; pattern; limits; addr; port; ntasks;
+    loc = _
   } = self
   in
-  Fmt.fprintf out "(@[<v1>run_provers.Slurm%a%a%a%a%a%a%a%a%a%a@])"
+  Fmt.fprintf out "(@[<v1>run_provers.Slurm%a%a%a%a%a%a%a%a%a%a%a%a@])"
     (pp_opt "partition" Fmt.string) partition
-    (pp_opt "nodes" Fmt.int) nodes
-    (pp_opt "db_file" Fmt.string) db_file
+    (pp_f "nodes" Fmt.int) nodes
+    (pp_f "addr" Misc.pp_inet_addr) addr
+    (pp_f "port" Fmt.int) port
+    (pp_f "ntasks" Fmt.int) ntasks
     (pp_opt "j" Fmt.int) j
     (pp_f "dirs" (pp_l Subdir.pp)) dirs
     (pp_f "provers" (pp_l Prover.pp_name)) provers

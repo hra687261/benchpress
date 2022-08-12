@@ -5,11 +5,17 @@ open Common
 module Log = (val Logs.src_log (Logs.Src.create "benchpress.runexec-action"))
 
 (** File for results with given uuid and timestamp *)
-let db_file_for_uuid ~timestamp (uuid:Uuidm.t) : string =
+let file_for_uuid pref ?(dir = Xdg.data_dir) ~timestamp (uuid:Uuidm.t) ext : string =
   let filename =
-    Misc.mk_uniq_filename ~pref:"res-" ~ext:".sqlite" timestamp uuid
+    Printf.sprintf "%s-%s-%s.%s"
+      pref
+      (match Ptime.of_float_s timestamp with
+       | None -> Printf.sprintf "<time %.1fs>" timestamp
+       | Some t -> Misc.datetime_compact t)
+      (Uuidm.to_string uuid)
+      ext
   in
-  let data_dir = Filename.concat (Xdg.data_dir ()) !(Xdg.name_of_project) in
+  let data_dir = Filename.concat (dir ()) !(Xdg.name_of_project) in
   (try Unix.mkdir data_dir 0o744 with _ -> ());
   Filename.concat data_dir filename
 
@@ -22,7 +28,6 @@ module Exec_run_provers : sig
     checkers: Proof_checker.t Misc.Str_map.t;
     limits : Limit.All.t;
     proof_dir: string option; (* directory in which to store proofs *)
-    db_file: string option; (* file in which to store the database *)
   }
 
   val expand :
@@ -32,8 +37,6 @@ module Exec_run_provers : sig
     ?proof_dir:string ->
     ?interrupted:(unit -> bool) ->
     Definitions.t ->
-    ?pb_file:string ->
-    ?db_file:string ->
     Limit.All.t ->
     int option ->
     string option ->
@@ -67,10 +70,11 @@ module Exec_run_provers : sig
     ?on_proof_check:(Test.proof_check_result -> unit) ->
     ?on_done:(Test_compact_result.t -> unit) ->
     ?interrupted:(unit -> bool) ->
-    ?config_file:string ->
     ?partition:string ->
-    ?nodes:int ->
-    ?db_file:string ->
+    nodes:int ->
+    addr:Unix.inet_addr ->
+    port:int ->
+    ntasks:int ->
     uuid:Uuidm.t ->
     save:bool ->
     expanded ->
@@ -87,7 +91,6 @@ end = struct
     checkers: Proof_checker.t Misc.Str_map.t;
     limits : Limit.All.t;
     proof_dir: string option; (* directory in which to store proofs *)
-    db_file: string option; (* file in which to store the database *)
   }
 
   let filter_regex_ = function
@@ -129,29 +132,27 @@ end = struct
            let res =Problem.make_find_expect path ~expect:s.Subdir.inside.expect in
            incr n_done;
            res)
-        with
-        | Error.E _ as e -> raise e
-        | exn -> Error.(raise @@ of_exn exn)
+    with
+    | Error.E _ as e -> raise e
+    | exn -> Error.(raise @@ of_exn exn)
 
   (* Expand options into concrete choices *)
   let expand ?j ?(dyn=false) ?limits ?proof_dir ?interrupted defs
-      ?pb_file ?db_file s_limits s_j s_pattern s_dirs s_provers: expanded =
+      s_limits s_j s_pattern s_dirs s_provers: expanded =
     let limits = match limits with
       | None -> s_limits
       | Some l -> Limit.All.with_defaults l ~defaults:s_limits
     in
     let j = j >?? s_j >? Misc.guess_cpu_count () in
-    let pbfl = CCOpt.map_or ~default:[] Problem.pb_list_of_file pb_file in
-    let problems =
-      pbfl @
-      CCList.flat_map
+    let problems = CCList.flat_map
         (expand_subdir ?pattern:s_pattern ~dyn ?interrupted) s_dirs in
     let checkers =
       Definitions.all_checkers defs
       |> List.map (fun c -> let c=c.With_loc.view in c.Proof_checker.name, c)
       |> Misc.Str_map.of_list
     in
-    { j; limits; problems; checkers; proof_dir; db_file; provers=s_provers; }
+    { j; limits; problems; checkers; proof_dir;
+      provers=s_provers; }
 
   let _nop _ = ()
 
@@ -173,16 +174,10 @@ end = struct
         ~f
     | _ -> f ()
 
-  let get_db_file ?db_file timestamp uuid =
-    CCOpt.map_or
-      ~default:(db_file_for_uuid ~timestamp uuid)
-      (fun f -> Misc.Shell.empty_file f; f)
-      db_file
-
-  let prepare_db ?db_file timestamp uuid save provers =
+  let prepare_db timestamp uuid save provers =
     let db =
       if save then (
-        let db_file = get_db_file ?db_file timestamp uuid in
+        let db_file = file_for_uuid "res" ~timestamp uuid "sqlite" in
         Sqlite3.db_open ~mutex:`FULL db_file
       ) else
         Sqlite3.db_open ":memory:"
@@ -213,7 +208,7 @@ end = struct
       ~uuid ~save
       (self:expanded) : _*_ =
     let start = Misc.now_s() in
-    let db = prepare_db ?db_file:self.db_file timestamp uuid save self.provers in
+    let db = prepare_db timestamp uuid save self.provers in
     on_start self;
 
     CCOpt.iter Misc.mkdir_rec self.proof_dir;
@@ -335,186 +330,292 @@ end = struct
     ignore (Sqlite3.db_close db : bool);
     top_res, r
 
-  let mk_sbatch_script ?config_file ?partition ?nodes
-      ?j ?(provers: Prover.t list = [])
-      (cmd_files: (string * string) list) =
-    let aux name opt acc =
-      CCOption.map_or ~default:acc
-        (fun v -> (name, Some v)::acc)
-        opt
+  let run_sbatch_job ?(timestamp=Misc.now_s()) ?(on_start=_nop)
+      ?(on_solve = _nop) ?(on_start_proof_check=_nop)
+      ?(on_proof_check = _nop) ?(on_done = _nop)
+      ?(interrupted=fun _->false) ?partition
+      ~nodes ~addr ~port ~ntasks ~uuid ~save (self:expanded) : _*_ =
+    ignore (on_start_proof_check);
+    let start = Misc.now_s() in
+    let db = prepare_db timestamp uuid save self.provers in
+    on_start self;
+    let jobs =
+      CCList.flat_map (
+        fun pb ->
+          CCList.map (fun prover -> prover.Prover.name,pb) self.provers
+      ) self.problems
     in
-    let aux_int name opt acc =
-      CCOption.map_or ~default:acc
-        (fun v -> (name, Some (Int.to_string v))::acc)
-        opt
-    in
-    let sbatch_options =
-      ("--wait", None) ::
-      ("-o", Some "slurm-%j.out") ::
-      ("-e", Some "slurm-%j.err") ::
-      ( aux "--partition" partition @@
-        aux_int "--ntasks" nodes @@
-        aux_int "--nodes" nodes []
+    let config_file = file_for_uuid "config" ~timestamp uuid "sexp"  in
+    let sexps =
+      Misc.Str_map.fold (
+        fun _ c acc ->
+          Stanza.proof_checker_wl_to_st (With_loc.make ~loc:Loc.none c) :: acc
+      ) self.checkers (
+        List.fold_left (
+          fun acc p ->
+            Stanza.prover_wl_to_st (With_loc.make ~loc:Loc.none p) :: acc
+        ) [] self.provers
       )
     in
-    let srun_options =
-      aux_int "--ntasks" (Some 1) @@
-      aux_int "--nodes" (Some 1) []
-      (* @@
-         CCOption.map_or ~default:[] (
-         fun v ->
-          if v > 1
-          then aux_int "--cpus-per-task" (Some v) []
-          else []
-         ) cpus_per_task *)
-    in
-    let provers_opt =
-      List.map (fun Prover.{ name; _ } -> "-p", Some name) provers
-    in
+    CCIO.with_out config_file (
+      fun oc ->
+        let ocf = Format.formatter_of_out_channel oc in
+        List.iter (Format.fprintf ocf "%a@." Stanza.pp) (List.rev sexps)
+    );
 
-    let rec aux_f l =
-      match l with
-      | (pb_file, db_file) :: t ->
-        let bp_options =
-          ("run", None) :: (
-            aux_int "-j" j @@
-            aux "--config" config_file (
-              ("--pp-results", Some "false") ::
-              ("--pb-file", Some pb_file) ::
-              ("--db-file", Some db_file) ::
-              provers_opt
+    let acc_aux opt v cond f acc =
+      if cond v
+      then (opt, f v) :: acc
+      else acc
+    in
+    let aux_acc_limits (limits: Limit.All.t) acc =
+      acc_aux "-t" limits.time (Option.is_some) (
+        Option.map
+          (fun t -> string_of_int Limit.(Time.as_int Time.Seconds t))
+      ) @@
+      acc_aux "-m" limits.memory (Option.is_some) (
+        Option.map
+          (fun m -> string_of_int Limit.(Memory.as_int Memory.Megabytes m))
+      ) acc
+    in
+    let sbatch_cmds =
+      let worker_cmd =
+        let worker_exec =
+          Format.sprintf "%s/benchpress_worker.exe" (Sys.getcwd ())
+        in
+        let worker_cmd_opts =
+          aux_acc_limits self.limits @@
+          acc_aux
+            "--proof-dir" self.proof_dir (Option.is_some) (Fun.id) @@
+          acc_aux "-j" self.j ((<) 1) (fun i -> Option.some (string_of_int i)) @@
+          [ "-a", Some (Unix.string_of_inet_addr addr);
+            "-p", Some (string_of_int port);
+            "-c", Some config_file;
+          ]
+        in
+        fun id ->
+          let options = ("--id", Some (string_of_int id)) :: worker_cmd_opts in
+          Misc.mk_shell_cmd ~options worker_exec ^ " >> tmp.txt"
+      in
+      let options =
+        acc_aux "--partition" partition (Option.is_some) Fun.id @@
+        [ "--nodes", Some "1"; "--exclusive", None; "--mem", Some "0"]
+      in
+      let wrap = true in
+      List.init nodes (
+        fun id ->
+          Slurm_cmd.grep_job_id
+            (Slurm_cmd.sbatch (worker_cmd (id+1)) ~options ~wrap)
+      )
+    in
+    let get_tasks =
+      let jobs_ref = ref jobs in
+      let jobs_lock = Mutex.create () in
+      fun j ->
+        Mutex.lock jobs_lock;
+        let rec aux j acc jobs =
+          match jobs with
+          | _ when j <= 0 ->
+            acc, jobs
+          | h :: t ->
+            aux (j - 1) (h :: acc) t
+          | [] ->
+            acc, []
+        in
+        let tasks, jobs = aux j [] !jobs_ref in
+        jobs_ref := jobs;
+        Mutex.unlock jobs_lock;
+        tasks
+    in
+    let add_resps, get_resps, get_nb_resps =
+      let nb_resps = ref 0 in
+      let resps_ref = ref [] in
+      let resps_lock = Mutex.create () in
+      let db_wl = CCLock.create db in
+      let add_resps evl =
+        Mutex.lock resps_lock;
+        nb_resps := !nb_resps + List.length evl;
+        resps_ref := List.rev_append evl !resps_ref;
+        List.iter (
+          fun ev ->
+            begin match ev with
+              | Run_event.Prover_run r -> on_solve r
+              | Checker_run r -> on_proof_check r
+            end;
+            CCLock.with_lock db_wl (fun db -> Run_event.to_db db ev)
+        ) evl;
+        Mutex.unlock resps_lock
+      in
+      let get_resps () =
+        Mutex.lock resps_lock;
+        let res = !resps_ref in
+        Mutex.unlock resps_lock;
+        res
+      in
+      let get_nb_resps () =
+        Mutex.lock resps_lock;
+        let res = List.length !resps_ref in
+        Mutex.unlock resps_lock;
+        res
+      in
+      add_resps, get_resps, get_nb_resps
+    in
+    let wdms_set_true, get_wdms =
+      let work_done_msg_sent = ref false in
+      let work_done_msg_sent_mutex = Mutex.create () in
+      let wdms_set_true () =
+        Mutex.lock work_done_msg_sent_mutex;
+        work_done_msg_sent := true;
+        Mutex.unlock work_done_msg_sent_mutex;
+      in
+      let get_wdms () =
+        Mutex.lock work_done_msg_sent_mutex;
+        let res = !work_done_msg_sent in
+        Mutex.unlock work_done_msg_sent_mutex;
+        res
+      in
+      wdms_set_true, get_wdms
+    in
+    let incr_nb_workers, decr_nb_workers, get_nb_workers =
+      let nb_workers = ref 0 in
+      let nb_workers_mutex = Mutex.create () in
+      let aux f () =
+        Mutex.lock nb_workers_mutex;
+        f nb_workers;
+        Mutex.unlock nb_workers_mutex;
+      in
+      aux incr,
+      aux decr,
+      fun () ->
+        Mutex.lock nb_workers_mutex;
+        let res = !nb_workers in
+        Mutex.unlock nb_workers_mutex;
+        res
+    in
+    let nb_jobs = List.length jobs in
+
+    let resp_sock_path =
+      file_for_uuid "benchpress" ~dir:(Xdg.runtime_dir)  ~timestamp uuid "sock"
+    in
+    let resp_sock_addr = (Unix.ADDR_UNIX resp_sock_path) in
+
+    let server_loop ic oc =
+      Log.debug (fun k->k"(@[server_loop@ : started.@])");
+      incr_nb_workers ();
+      try
+        while true do
+          match Marshal.from_channel ic with
+          | Msg.Worker_response (id, evl) ->
+            Log.debug (fun k->k"(@[server_loop@ : Worker %d sent %d responses.@])"
+                          id (List.length evl));
+            if evl <> [] then add_resps evl;
+            let tasks = get_tasks ntasks in
+            if tasks = []
+            then (
+              Marshal.to_channel oc (Msg.Stop_worker) [];
+              flush oc;
+              Log.debug (fun k->k"(@[server_loop@ : Sent \"Stop_worker\" to Worker \
+                                  %d. No more tasks left.@])" id)
+            ) else (
+              Marshal.to_channel oc (Msg.Worker_task tasks) [];
+              flush oc;
+              Log.debug (fun k->k"(@[server_loop@ : Sent %d tasks to Worker %d@])"
+                            (List.length tasks) id)
             )
-          )
-        in
-        let bp_cmd =
-          Misc.Shell.mk_cmd Sys.executable_name ~options:bp_options
-        in
-        (Slurm_cmd.srun bp_cmd ~options:srun_options, true) :: aux_f t
-      | [] -> []
-    in
-    let cmds = List.rev (("wait", false) :: aux_f cmd_files) in
-    Slurm_cmd.sbatch_script ~options:sbatch_options cmds
-
-  (** [join_db_tables dest_file dbfl] Merges the databases stored in the files
-      dbfl into a new database that will be stored in the file [dest_file].
-
-      Assumes:
-      - The tables "prover_res" and "proof_check_res" exist in all
-      the files and that their elements all have distinct indexes.
-      - All the other tables are the same in every file.
-      - The user has the right to write into [dest_file] and all the files in
-      [dbfl].*)
-  let join_db_tables
-      dest_file (dbfl: (string * string) list) =
-    let mk_cmd fsrc fdest =
-      Format.sprintf
-        "sqlite3 %s <<EOF\n\
-         attach database \"%s\" as source;\n\
-         insert into prover_res select * from source.prover_res;\n\
-         insert into proof_check_res select * from source.proof_check_res;\n\
-         EOF"
-        fdest fsrc
-    in
-    let rec aux srcl dest =
-      match srcl with
-      | (_, db_file) :: tl ->
-        let cmd = mk_cmd db_file dest in
-        let res = Run_proc.run cmd in
-        if res.errcode <> 0
-        then Error.fail (
-            Format.sprintf
-              "The joining of the database \"%s\" and \"%s\" failed:\n%s"
-              db_file dest res.stderr
-          );
-        aux tl dest
-      | [] -> dest
-    in
-    match dbfl with
-    | (_, db_file) :: t ->
-      Misc.Shell.copy db_file dest_file;
-      aux t dest_file
-    | [] -> Error.fail "No databases were provided to join"
-
-  let rm_files script_file cmd_files =
-    let aux (pb_file, db_file) =
-      Misc.Shell.rm db_file;
-      Misc.Shell.rm pb_file
-    in
-    Misc.Shell.rm script_file;
-    List.iter aux cmd_files
-
-  let run_sbatch_job
-      ?(timestamp=Misc.now_s())
-      ?(on_start=_nop)
-      ?(on_solve = _nop)
-      ?(on_start_proof_check=_nop)
-      ?(on_proof_check = _nop)
-      ?(on_done = _nop)
-      ?(interrupted=fun _->false)
-      ?config_file ?partition ?nodes ?db_file ~uuid ~save
-      (self:expanded) : _*_ =
-    ignore (save, interrupted, on_start, on_solve, on_start_proof_check, on_proof_check);
-
-    let pbll =
-      Misc.split_list self.problems (CCOpt.get_or ~default:1 nodes)
-    in
-    let data_dir = Filename.concat (Xdg.data_dir ()) !(Xdg.name_of_project) in
-    (try Unix.mkdir data_dir 0o744 with _ -> ());
-    let f_uniq_id =
-      Misc.mk_uniq_filename timestamp uuid
-    in
-    let aux_mk_uniq_filename pref ext =
-      data_dir ^ pref ^ f_uniq_id ^ ext
+          | Msg.Worker_failure (id, e) ->
+            Log.err (fun k->k"(@[server_loop@ : Worker %d failed!@])" id);
+            raise e
+        done
+      with
+      | End_of_file ->
+        Log.err (fun k->k"(@[server_loop@ : Worker closed the connection.@])");
+        close_out oc;
+        decr_nb_workers ();
+        if get_nb_workers () = 0
+        && get_nb_resps () = nb_jobs
+        && not (get_wdms ())
+        then begin
+          wdms_set_true ();
+          let _, oc =
+            Unix.handle_unix_error Unix.open_connection resp_sock_addr
+          in
+          Marshal.to_channel oc Msg.Work_done [];
+          flush oc;
+          Log.debug (fun k->k"(@[server_loop@ : Sent \"Work_done\" to parent proc.@])");
+          close_out oc
+        end
+      | e ->
+        Log.err (fun k->k"(@[server_loop@ : Worker failed!@])");
+        close_out oc;
+        decr_nb_workers ();
+        raise e
     in
 
-    let _, rev_cmd_files =
+    let sock_addr = Unix.ADDR_INET (addr, port) in
+    ignore @@
+    CCThread.spawn
+      (fun () -> Misc.establish_server nodes server_loop sock_addr);
+    Log.debug (fun k->k"Spawned the thread that establishes a server listening \
+                        at: %a." Misc.pp_unix_addr sock_addr);
+    let job_ids =
       List.fold_left (
-        fun (n, accl) pbl ->
-          let db_file =
-            aux_mk_uniq_filename ("/dbf-" ^ Int.to_string n) ".sqlite"
-          in
-          let pb_file =
-            aux_mk_uniq_filename ("/pbf-" ^ Int.to_string n) ".data"
-          in
-          Misc.Shell.empty_file pb_file;
-          Misc.Shell.empty_file db_file;
-          Problem.pb_list_to_file pbl pb_file;
-          n + 1,
-          (pb_file, db_file) :: accl
-      ) (1, []) pbll
+        fun acc cmd ->
+          let rpres = Run_proc.run cmd in
+          int_of_string (String.trim rpres.stdout) :: acc
+      ) [] sbatch_cmds
     in
-    let cmd_files = List.rev rev_cmd_files in
-    let sbatch_script =
-      mk_sbatch_script ?config_file ?partition ?nodes
-        ~j:self.j ~provers:self.provers cmd_files
-    in
-    let script_path = aux_mk_uniq_filename "/script-" ".sh" in
-    let oc = open_out script_path  in
-    CCIO.write_line oc sbatch_script;
-    close_out oc;
+    Log.debug (fun k->k"Submitted %d scripts to launch workers to slurm."
+                  (List.length job_ids));
+    Log.debug (fun k->k"Waiting for the \"Work_done\" message.");
+    Misc.establish_server 1 (
+      fun ic _ ->
+        match Marshal.from_channel ic with Msg.Work_done -> ()
+    ) resp_sock_addr;
+    Log.debug (fun k->k"Received the \"Work_done\" message.");
 
-    let sbatch_cmd = Slurm_cmd.sbatch script_path in
-    let res = Run_proc.run sbatch_cmd in
-    if res.errcode <> 0
-    then Error.fail (
-        Format.sprintf
-          "sbatch script submission failure:\n%s"
-          res.stderr
-      );
+    List.iter (
+      fun job_id ->
+        ignore (Sys.command (Slurm_cmd.scancel job_id))
+    ) job_ids;
+    Log.debug (fun k->k"Killed the workers that are still alire or didn't \
+                        start yet.");
 
-    let db_dest_file = get_db_file ?db_file timestamp uuid in
-    Misc.Shell.empty_file db_dest_file;
-    let res_db = join_db_tables db_dest_file cmd_files in
-    let db = Sqlite3.db_open res_db in
-    let top_res = lazy ( Test_top_result.of_db db) in
+    Sys.remove config_file;
+    Sys.remove resp_sock_path;
+    Log.debug (fun k->k"Delete the generated config_file and linux socket \
+                        file.");
+
+    if interrupted() then (
+      Error.fail "run.interrupted";
+    );
+    let total_wall_time = Misc.now_s() -. start in
+    let uuid = uuid in
+    Logs.info (fun k->k"benchmark done in %a, uuid=%a"
+                  Misc.pp_human_duration total_wall_time Uuidm.pp uuid);
+    let timestamp = Some timestamp in
+    let total_wall_time = Some total_wall_time in
+    let meta = {
+      Test_metadata.uuid; timestamp; total_wall_time; n_results=0; dirs=[]; n_bad=0;
+      provers=List.map Prover.name self.provers;
+    } in
+    Logs.debug (fun k->k "saving metadata…");
+    Test_metadata.to_db db meta;
+    let top_res = lazy (
+      let provers_map =
+        List.fold_left
+          (fun m ( { Prover.name; _ } as p) -> Misc.Str_map.add name p m)
+          Misc.Str_map.empty self.provers
+      in
+      let provers =
+        List.map (fun (pn, _) -> Misc.Str_map.find pn provers_map) jobs
+      in
+      Test_top_result.make ~meta ~provers (get_resps ())
+    ) in
     let r = Test_compact_result.of_db db in
-    (* delete the temporary files. *)
-    rm_files script_path cmd_files;
     on_done r;
     Logs.debug (fun k->k "closing db…");
     ignore (Sqlite3.db_close db : bool);
     top_res, r
-
 end
 
 type cb_progress = <
@@ -702,16 +803,15 @@ let rec run ?(save=true) ?interrupted ?cb_progress
     | Action.Act_run_provers r ->
       let is_dyn = CCOpt.get_or ~default:false @@ Definitions.option_progress defs in
       let r_expanded =
-        Exec_run_provers.expand
-          ?interrupted ~dyn:is_dyn ?j:(Definitions.option_j defs)
-          ?pb_file:r.pb_file ?db_file:r.db_file defs r.limits r.j r.pattern r.dirs r.provers
+        Exec_run_provers.expand ?interrupted ~dyn:is_dyn
+          ?j:(Definitions.option_j defs) defs r.limits r.j r.pattern r.dirs r.provers
       in
       let progress =
         Progress_run_provers.make ~pp_results:true ~dyn:is_dyn
           ?cb_progress r_expanded
       in
       let uuid = Misc.mk_uuid () in
-      let res =
+      let _top_res, res =
         Exec_run_provers.run ?interrupted
           ~on_solve:progress#on_res
           ~on_proof_check:progress#on_proof_check_res
@@ -720,33 +820,26 @@ let rec run ?(save=true) ?interrupted ?cb_progress
       in
       Format.printf "task done: %a@." Test_compact_result.pp res;
       ()
-    | Act_run_slurm_submission {
-        nodes; db_file; j; dirs; provers; pattern; limits; _
-      } ->
+    | Act_run_slurm_submission { nodes; j; dirs; provers; pattern; limits;
+                                 partition; addr; port; ntasks; _ } ->
       let is_dyn = CCOpt.get_or ~default:false @@ Definitions.option_progress defs in
       let r_expanded =
         Exec_run_provers.expand
           ?interrupted ~dyn:is_dyn ?j:(Definitions.option_j defs)
-          ?db_file defs limits j pattern dirs provers
+          defs limits j pattern dirs provers
       in
       let progress =
         Progress_run_provers.make ~pp_results:true ~dyn:is_dyn
           ?cb_progress r_expanded
       in
       let uuid = Misc.mk_uuid () in
-      let config_file = Definitions.config_file defs in
-      let res =
+      let _top_res, res =
         Exec_run_provers.run_sbatch_job
-          ~timestamp:(Misc.now_s())
-          ?interrupted
+          ~timestamp:(Misc.now_s()) ?interrupted
           ~on_solve:progress#on_res
           ~on_proof_check:progress#on_proof_check_res
-          ~on_done:(fun _ -> progress#on_done) ~uuid
-          ~save
-          ?config_file
-          ?nodes
-          ?db_file
-          r_expanded
+          ~on_done:(fun _ -> progress#on_done)
+          ~uuid ~save ?partition ~ntasks ~nodes ~addr ~port r_expanded
       in
       Format.printf "task done: %a@." Test_compact_result.pp res;
       ()
