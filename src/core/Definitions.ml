@@ -189,7 +189,7 @@ let mk_run_provers_slurm_submission
   let limits = mk_limits ?timeout ?memory ?stack () in
   let nodes = ge_val nodes 1 1 in
   let addr = CCOpt.value addr ~default:(Misc.localhost_addr ()) in
-  let port = ge_val port 0 8080 in
+  let port = ge_val port 0 0 in
   let j = Some (ge_val j 1 4) in
   let ntasks = ge_val ntasks 1 10 in
   { partition; nodes; j; addr; port; ntasks;

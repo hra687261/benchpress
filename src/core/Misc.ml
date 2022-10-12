@@ -209,6 +209,22 @@ let rec mkdir_rec (d:string) =
      with _ -> Logs.debug (fun k->k "mkdir %S failed" d));
   )
 
+(** [file_for_uuid pref ?dir ~timestamp uuid ext] builds a filename of the form
+    "[pref]-[timestamp]-[uuid].[ext]" *)
+let file_for_uuid pref ?(dir = Xdg.data_dir) ~timestamp uuid ext =
+  let filename =
+    Printf.sprintf "%s-%s-%s.%s"
+      pref
+      (match Ptime.of_float_s timestamp with
+       | None -> Printf.sprintf "<time %.1fs>" timestamp
+       | Some t -> datetime_compact t)
+      (Uuidm.to_string uuid)
+      ext
+  in
+  let data_dir = Filename.concat (dir ()) !(Xdg.name_of_project) in
+  mkdir_rec data_dir;
+  Filename.concat data_dir filename
+
 (** concatenate list into a path *)
 let rec filename_concat_l = function
   | [] -> "."
@@ -385,15 +401,23 @@ let rec accept_non_intr s =
   try Unix.accept ~cloexec:true s
   with Unix.Unix_error (EINTR, _, _) -> accept_non_intr s
 
-(** [establish_server n server_fun sockaddr] same as [Unix.establish_server],
-    but it uses threads instead of forking the process after each connection,
-    and only accepts [n] connections. *)
-let establish_server n server_fun sockaddr =
+(** [mk_socket sockaddr] makes a socket, binds to [sockaddr] and returns it
+    along with the name of the service if is a unix socket or the port number
+    if is an internet socket. *)
+let mk_socket sockaddr =
   let open Unix in
   let sock =
     socket ~cloexec:true (domain_of_sockaddr sockaddr) SOCK_STREAM 0 in
   setsockopt sock SO_REUSEADDR true;
   bind sock sockaddr;
+  sock, (Unix.getnameinfo (Unix.getsockname sock) []).ni_service
+
+(** [start_server n server_fun sock] starts a server on the socket [sock],
+    assumes that the socket is correcly bound to a valid address.
+    Allows up to [n] connections and runs function [server_fun] for each
+    connection on a separate thread (uses threads, doesn't fork the process).*)
+let start_server n server_fun sock =
+  let open Unix in
   listen sock 5;
   CCThread.Arr.join @@
   CCThread.Arr.spawn n (
@@ -403,3 +427,10 @@ let establish_server n server_fun sockaddr =
       let outchan = out_channel_of_descr s in
       server_fun inchan outchan;
   )
+
+(** [establish_server n server_fun sockaddr] same as
+    [Unix.establish_server], but it uses threads instead of forking the process
+    after each connection, and only accepts [n] connections  *)
+let establish_server n server_fun sockaddr =
+  let sock, _ = mk_socket sockaddr in
+  start_server n server_fun sock

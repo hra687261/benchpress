@@ -121,7 +121,7 @@ module Slurm = struct
     and addr =
       Arg.(value & opt (some Misc.ip_addr_conv) None & info ["a"; "addr"] ~doc:"IP address of the server on the control node. Needs to be reachable by the workers which will run on the allocated calculation nodes.")
     and port =
-      Arg.(value & opt (some int) None & info ["port"] ~doc:"port of the server on the control node. Default is 8080.")
+      Arg.(value & opt (some int) None & info ["port"] ~doc:"port of the server on the control node. Default is 0 to let the OS choose a port.")
     and ntasks =
       Arg.(value & opt (some int) None & info [ "ntasks"] ~doc:"The number of tasks to give the workers at a time.")
     in

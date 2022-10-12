@@ -4,21 +4,6 @@
 open Common
 module Log = (val Logs.src_log (Logs.Src.create "benchpress.runexec-action"))
 
-(** File for results with given uuid and timestamp *)
-let file_for_uuid pref ?(dir = Xdg.data_dir) ~timestamp (uuid:Uuidm.t) ext : string =
-  let filename =
-    Printf.sprintf "%s-%s-%s.%s"
-      pref
-      (match Ptime.of_float_s timestamp with
-       | None -> Printf.sprintf "<time %.1fs>" timestamp
-       | Some t -> Misc.datetime_compact t)
-      (Uuidm.to_string uuid)
-      ext
-  in
-  let data_dir = Filename.concat (dir ()) !(Xdg.name_of_project) in
-  (try Unix.mkdir data_dir 0o744 with _ -> ());
-  Filename.concat data_dir filename
-
 module Exec_run_provers : sig
 
   type expanded = {
@@ -177,7 +162,7 @@ end = struct
   let prepare_db timestamp uuid save provers =
     let db =
       if save then (
-        let db_file = file_for_uuid "res" ~timestamp uuid "sqlite" in
+        let db_file = Misc.file_for_uuid "res" ~timestamp uuid "sqlite" in
         Sqlite3.db_open ~mutex:`FULL db_file
       ) else
         Sqlite3.db_open ":memory:"
@@ -345,7 +330,7 @@ end = struct
           CCList.map (fun prover -> prover.Prover.name,pb) self.provers
       ) self.problems
     in
-    let config_file = file_for_uuid "config" ~timestamp uuid "sexp"  in
+    let config_file = Misc.file_for_uuid "config" ~timestamp uuid "sexp"  in
     let sexps =
       Misc.Str_map.fold (
         fun _ c acc ->
@@ -363,51 +348,6 @@ end = struct
         List.iter (Format.fprintf ocf "%a@." Stanza.pp) (List.rev sexps)
     );
 
-    let acc_aux opt v cond f acc =
-      if cond v
-      then (opt, f v) :: acc
-      else acc
-    in
-    let aux_acc_limits (limits: Limit.All.t) acc =
-      acc_aux "-t" limits.time (Option.is_some) (
-        Option.map
-          (fun t -> string_of_int Limit.(Time.as_int Time.Seconds t))
-      ) @@
-      acc_aux "-m" limits.memory (Option.is_some) (
-        Option.map
-          (fun m -> string_of_int Limit.(Memory.as_int Memory.Megabytes m))
-      ) acc
-    in
-    let sbatch_cmds =
-      let worker_cmd =
-        let worker_exec =
-          Format.sprintf "%s/benchpress_worker.exe" (Sys.getcwd ())
-        in
-        let worker_cmd_opts =
-          aux_acc_limits self.limits @@
-          acc_aux
-            "--proof-dir" self.proof_dir (Option.is_some) (Fun.id) @@
-          acc_aux "-j" self.j ((<) 1) (fun i -> Option.some (string_of_int i)) @@
-          [ "-a", Some (Unix.string_of_inet_addr addr);
-            "-p", Some (string_of_int port);
-            "-c", Some config_file;
-          ]
-        in
-        fun id ->
-          let options = ("--id", Some (string_of_int id)) :: worker_cmd_opts in
-          Misc.mk_shell_cmd ~options worker_exec ^ " >> tmp.txt"
-      in
-      let options =
-        acc_aux "--partition" partition (Option.is_some) Fun.id @@
-        [ "--nodes", Some "1"; "--exclusive", None; "--mem", Some "0"]
-      in
-      let wrap = true in
-      List.init nodes (
-        fun id ->
-          Slurm_cmd.grep_job_id
-            (Slurm_cmd.sbatch (worker_cmd (id+1)) ~options ~wrap)
-      )
-    in
     let get_tasks =
       let jobs_ref = ref jobs in
       let jobs_lock = Mutex.create () in
@@ -495,7 +435,7 @@ end = struct
     let nb_jobs = List.length jobs in
 
     let resp_sock_path =
-      file_for_uuid "benchpress" ~dir:(Xdg.runtime_dir)  ~timestamp uuid "sock"
+      Misc.file_for_uuid "benchpress" ~dir:(Xdg.runtime_dir)  ~timestamp uuid "sock"
     in
     let resp_sock_addr = (Unix.ADDR_UNIX resp_sock_path) in
 
@@ -551,12 +491,16 @@ end = struct
         raise e
     in
 
-    let sock_addr = Unix.ADDR_INET (addr, port) in
+    let sock, used_port = Misc.mk_socket (Unix.ADDR_INET (addr, port)) in
     ignore @@
-    CCThread.spawn
-      (fun () -> Misc.establish_server nodes server_loop sock_addr);
+    CCThread.spawn (fun () -> Misc.start_server nodes server_loop sock);
+
     Log.debug (fun k->k"Spawned the thread that establishes a server listening \
-                        at: %a." Misc.pp_unix_addr sock_addr);
+                        at: %s:%s." (Unix.string_of_inet_addr addr) used_port);
+    let sbatch_cmds =
+      Slurm_cmd.mk_sbatch_cmds self.limits self.proof_dir self.j addr used_port
+        partition config_file nodes
+    in
     let job_ids =
       List.fold_left (
         fun acc cmd ->
