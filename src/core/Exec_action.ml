@@ -505,7 +505,9 @@ end = struct
       List.fold_left (
         fun acc cmd ->
           let rpres = Run_proc.run cmd in
-          int_of_string (String.trim rpres.stdout) :: acc
+          let job_id = int_of_string (String.trim rpres.stdout) in
+          Log.debug (fun k->k"Submitted the job %d to slurm@." job_id);
+          job_id :: acc
       ) [] sbatch_cmds
     in
     Log.debug (fun k->k"Submitted %d scripts to launch workers to slurm."
