@@ -27,7 +27,7 @@ type run_provers_slurm_submission = {
   (* port of the server in the control node. *)
   j: int option;
   (* number of parallel threads that will be launched by the workers.
-     Default is 4. *)
+     Default is the number of processors on the node. *)
   ntasks: int;
   (* The number of tasks to give the workers at a time.
      Default is equal to the number of threads. *)

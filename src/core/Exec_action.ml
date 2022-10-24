@@ -16,6 +16,7 @@ module Exec_run_provers : sig
   }
 
   val expand :
+    ?slurm:bool ->
     ?j:int ->
     ?dyn:bool ->
     ?limits:Limit.All.t ->
@@ -122,13 +123,13 @@ end = struct
     | exn -> Error.(raise @@ of_exn exn)
 
   (* Expand options into concrete choices *)
-  let expand ?j ?(dyn=false) ?limits ?proof_dir ?interrupted defs
+  let expand ?(slurm=false) ?j ?(dyn=false) ?limits ?proof_dir ?interrupted defs
       s_limits s_j s_pattern s_dirs s_provers: expanded =
     let limits = match limits with
       | None -> s_limits
       | Some l -> Limit.All.with_defaults l ~defaults:s_limits
     in
-    let j = j >?? s_j >? Misc.guess_cpu_count () in
+    let j = j >?? s_j >? (if slurm then 0 else Misc.guess_cpu_count ()) in
     let problems = CCList.flat_map
         (expand_subdir ?pattern:s_pattern ~dyn ?interrupted) s_dirs in
     let checkers =
@@ -468,7 +469,7 @@ end = struct
         done
       with
       | End_of_file ->
-        Log.err (fun k->k"(@[server_loop@ : Worker closed the connection.@])");
+        Log.debug (fun k->k"(@[server_loop@ : Worker closed the connection.@])");
         close_out oc;
         decr_nb_workers ();
         if get_nb_workers () = 0
@@ -555,7 +556,7 @@ end = struct
       let provers =
         List.map (fun (pn, _) -> Misc.Str_map.find pn provers_map) jobs
       in
-      Test_top_result.make ~meta ~provers (get_resps ())
+      Test_top_result.make ~analyze_full:true ~meta ~provers (get_resps ())
     ) in
     let r = Test_compact_result.of_db db in
     on_done r;
@@ -771,7 +772,7 @@ let rec run ?(save=true) ?interrupted ?cb_progress
       let is_dyn = CCOpt.get_or ~default:false @@ Definitions.option_progress defs in
       let r_expanded =
         Exec_run_provers.expand
-          ?interrupted ~dyn:is_dyn ?j:(Definitions.option_j defs)
+          ~slurm:true ?interrupted ~dyn:is_dyn ?j:(Definitions.option_j defs)
           defs limits j pattern dirs provers
       in
       let progress =

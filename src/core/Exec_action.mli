@@ -16,6 +16,7 @@ module Exec_run_provers : sig
   }
 
   val expand :
+    ?slurm:bool ->
     ?j:int ->
     ?dyn:bool ->
     ?limits:Limit.All.t ->

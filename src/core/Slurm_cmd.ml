@@ -47,9 +47,9 @@ let mk_sbatch_cmds limits proof_dir j addr port partition config_file n =
     in
     let worker_cmd_opts =
       aux_acc_limits limits @@
-      acc_aux
-        "--proof-dir" proof_dir (Option.is_some) (Fun.id) @@
-      acc_aux "-j" j ((<) 1) (fun i -> Option.some (string_of_int i)) @@
+      acc_aux "--proof-dir" proof_dir (Option.is_some) (Fun.id) @@
+      acc_aux "-j" j (function i when i > 0 -> true | _ -> false)
+        (fun i -> Some (string_of_int i)) @@
       [ "-a", Some (Unix.string_of_inet_addr addr);
         "-p", Some port;
         "-c", Some config_file;

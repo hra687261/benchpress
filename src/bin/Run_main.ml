@@ -41,7 +41,7 @@ let execute_submit_job_action
   let interrupted = CCLock.create false in
   let exp_r =
     Exec_action.Exec_run_provers.expand
-      ?dyn ?j ?proof_dir ?limits defs
+      ~slurm:true ?dyn ?j ?proof_dir ?limits defs
       r.limits r.j r.pattern r.dirs r.provers
   in
   let len = List.length exp_r.problems in
