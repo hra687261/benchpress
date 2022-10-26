@@ -4,7 +4,7 @@
  (package benchpress-worker)
  (modes native)
  (promote (into ../../) (until-clean))
- (libraries benchpress containers unix)
+ (libraries benchpress containers)
  (flags :standard -warn-error -a+8 -safe-string -open Benchpress -linkall))
 
 (rule
