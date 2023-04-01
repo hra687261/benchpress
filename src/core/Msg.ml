@@ -1,4 +1,3 @@
-
 type master_msg =
   | Worker_task of (string * Problem.t) list (* prover name, problem *)
   | Stop_worker
